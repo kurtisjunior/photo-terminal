@@ -15,16 +15,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from config import load_config
-from scanner import scan_folder
-from tui import select_images
-from s3_browser import browse_s3_folders
-from confirmation import confirm_upload
-from dry_run import dry_run_upload
-from duplicate_checker import check_for_duplicates, DuplicateFilesError
-from processor import process_images, ProcessingError, InsufficientDiskSpaceError
-from uploader import upload_images, UploadError
-from summary import show_completion_summary
+from photo_terminal.config import load_config
+from photo_terminal.scanner import scan_folder
+from photo_terminal.tui import select_images
+from photo_terminal.s3_browser import browse_s3_folders
+from photo_terminal.confirmation import confirm_upload
+from photo_terminal.dry_run import dry_run_upload
+from photo_terminal.duplicate_checker import check_for_duplicates, DuplicateFilesError
+from photo_terminal.processor import process_images, ProcessingError, InsufficientDiskSpaceError
+from photo_terminal.uploader import upload_images, UploadError
+from photo_terminal.summary import show_completion_summary
 
 
 def validate_folder_path(folder_path: str) -> Path:

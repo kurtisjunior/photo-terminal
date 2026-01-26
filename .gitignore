@@ -49,6 +49,7 @@ Thumbs.db
 *.bmp
 test_images/
 temp_*/
+photo_upload_*/
 
 # Planwheel
 .planwheel/

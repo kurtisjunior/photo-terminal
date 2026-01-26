@@ -6,7 +6,7 @@ images with automatic cleanup and retry scenarios.
 """
 
 from pathlib import Path
-from processor import (
+from photo_terminal.processor import (
     process_images,
     ProcessingError,
     InsufficientDiskSpaceError

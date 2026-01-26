@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-terminal"
+version = "1.0.0"
+description = "Terminal-based image upload manager with inline preview for S3"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "PyYAML",
+    "Pillow",
+    "boto3",
+    "rich",
+]
+
+[project.scripts]
+photo-upload = "photo_terminal.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]

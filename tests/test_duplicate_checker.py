@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
-from duplicate_checker import (
+from photo_terminal.duplicate_checker import (
     check_for_duplicates,
     DuplicateFilesError,
     _check_sequential,
@@ -220,7 +220,7 @@ class TestCheckParallel:
 class TestCheckForDuplicates:
     """Tests for check_for_duplicates main function."""
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_no_duplicates_success(self, mock_session):
         """Test successful check with no duplicates."""
         mock_client = Mock()
@@ -237,7 +237,7 @@ class TestCheckForDuplicates:
         mock_session.assert_called_once_with(profile_name='my-profile')
         assert mock_client.head_object.call_count == 2
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_single_duplicate_raises_error(self, mock_session):
         """Test that single duplicate raises DuplicateFilesError."""
         mock_client = Mock()
@@ -258,7 +258,7 @@ class TestCheckForDuplicates:
         assert exc_info.value.duplicates == ['photo1.jpg']
         assert 'japan/tokyo' in str(exc_info.value)
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_multiple_duplicates_raises_error(self, mock_session):
         """Test that multiple duplicates raises DuplicateFilesError."""
         mock_client = Mock()
@@ -275,7 +275,7 @@ class TestCheckForDuplicates:
         assert 'img2.png' in str(exc_info.value)
         assert 'img3.gif' in str(exc_info.value)
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_empty_prefix_root_level(self, mock_session):
         """Test checking at bucket root with empty prefix."""
         mock_client = Mock()
@@ -291,7 +291,7 @@ class TestCheckForDuplicates:
         # Should check without prefix
         mock_client.head_object.assert_called_once_with(Bucket='bucket', Key='img.jpg')
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_prefix_normalization(self, mock_session):
         """Test that prefix is normalized correctly."""
         mock_client = Mock()
@@ -310,7 +310,7 @@ class TestCheckForDuplicates:
             Bucket='bucket', Key='japan/tokyo/img.jpg'
         )
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_empty_image_list_returns_immediately(self, mock_session):
         """Test that empty image list returns without checking S3."""
         images = []
@@ -321,7 +321,7 @@ class TestCheckForDuplicates:
         # Session should not be created
         mock_session.assert_not_called()
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_aws_session_init_failure(self, mock_session, capsys):
         """Test AWS session initialization failure."""
         mock_session.side_effect = Exception('Invalid profile')
@@ -338,7 +338,7 @@ class TestCheckForDuplicates:
         assert 'bad-profile' in captured.out
         assert 'aws configure' in captured.out
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_uses_sequential_check_for_small_batch(self, mock_session):
         """Test that small batches (<= 10 files) use sequential checking."""
         mock_client = Mock()
@@ -355,7 +355,7 @@ class TestCheckForDuplicates:
         # All checks should have been made
         assert mock_client.head_object.call_count == 10
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_uses_parallel_check_for_large_batch(self, mock_session):
         """Test that large batches (> 10 files) use parallel checking."""
         mock_client = Mock()
@@ -372,7 +372,7 @@ class TestCheckForDuplicates:
         # All checks should have been made
         assert mock_client.head_object.call_count == 15
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_s3_key_construction(self, mock_session):
         """Test that S3 keys are constructed correctly."""
         mock_client = Mock()
@@ -395,7 +395,7 @@ class TestCheckForDuplicates:
         keys_checked = {call.kwargs['Key'] for call in calls}
         assert keys_checked == {'italy/rome/photo.jpg', 'italy/rome/image.png'}
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_preserves_original_filenames(self, mock_session):
         """Test that original filenames are preserved in checks."""
         mock_client = Mock()
@@ -419,7 +419,7 @@ class TestCheckForDuplicates:
         assert 'prefix/My Photo (1).jpg' in keys_checked
         assert 'prefix/IMG_2024-01-15.png' in keys_checked
 
-    @patch('duplicate_checker.boto3.Session')
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_all_or_nothing_check(self, mock_session):
         """Test that ALL files are checked before raising error."""
         mock_client = Mock()

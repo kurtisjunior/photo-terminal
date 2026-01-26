@@ -5,7 +5,7 @@ This demonstrates how the configuration system works and how it will
 be integrated with CLI overrides in the next step.
 """
 
-from config import load_config
+from photo_terminal.config import load_config
 
 
 def main():

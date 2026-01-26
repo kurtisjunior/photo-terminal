@@ -20,7 +20,7 @@ from PIL import Image
 from PIL.ExifTags import TAGS
 import io
 
-from optimizer import (
+from photo_terminal.optimizer import (
     optimize_image,
     OptimizationWarning,
     QUALITY_STEPS,

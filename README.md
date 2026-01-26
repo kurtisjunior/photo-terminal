@@ -47,10 +47,20 @@ cargo install viu
 
 **Other platforms**: See [viu installation guide](https://github.com/atanunq/viu#installation)
 
-### 2. Install Python Dependencies
+### 2. Install Package
+
+Clone the repository and install in development mode:
 
 ```bash
-pip install pillow boto3 pyyaml
+git clone <repository-url>
+cd photo-terminal
+pip install -e .
+```
+
+Or install just the dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
 
 ### 3. Configure AWS CLI
@@ -63,12 +73,6 @@ Enter your AWS credentials when prompted. Make sure your profile has permissions
 - `s3:ListBucket` (to browse folders and check duplicates)
 - `s3:PutObject` (to upload images)
 
-### 4. Clone Repository
-
-```bash
-git clone <repository-url>
-cd photo-terminal
-```
 
 ## Configuration
 
@@ -92,14 +96,22 @@ All configuration values can be overridden via command-line arguments.
 
 ### Basic Usage
 
+After installation with `pip install -e .`, you can use the `photo-upload` command:
+
 ```bash
-python photo_upload.py /path/to/images --prefix japan/tokyo
+photo-upload /path/to/images --prefix japan/tokyo
+```
+
+Or run as a Python module:
+
+```bash
+python -m photo_terminal /path/to/images --prefix japan/tokyo
 ```
 
 ### Command-Line Options
 
 ```
-photo_upload.py <folder_path> [options]
+photo-upload <folder_path> [options]
 
 Required Arguments:
   folder_path              Path to folder containing images
@@ -115,23 +127,23 @@ Optional Arguments:
 
 **Upload with specific prefix**:
 ```bash
-python photo_upload.py ./vacation-photos --prefix italy/trapani
+photo-upload ./vacation-photos --prefix italy/trapani
 ```
 
 **Upload with interactive folder browser**:
 ```bash
-python photo_upload.py ./vacation-photos
+photo-upload ./vacation-photos
 # Launches interactive S3 folder browser
 ```
 
 **Use custom target size**:
 ```bash
-python photo_upload.py ./photos --prefix spain/barcelona --target-size 500
+photo-upload ./photos --prefix spain/barcelona --target-size 500
 ```
 
 **Dry-run to preview changes**:
 ```bash
-python photo_upload.py ./photos --prefix france/paris --dry-run
+photo-upload ./photos --prefix france/paris --dry-run
 ```
 
 ## Workflow
@@ -156,7 +168,7 @@ The application follows this workflow:
 Use `--dry-run` to preview what would happen without actually uploading:
 
 ```bash
-python photo_upload.py ./photos --prefix test --dry-run
+photo-upload ./photos --prefix test --dry-run
 ```
 
 Output shows:
@@ -293,10 +305,10 @@ Run the test suite:
 pytest
 
 # Run specific test file
-pytest test_photo_upload.py -v
+pytest tests/test_photo_upload.py -v
 
 # Run with coverage
-pytest --cov=. --cov-report=html
+pytest --cov=photo_terminal --cov-report=html
 ```
 
 ## Troubleshooting
@@ -346,20 +358,32 @@ aws s3 ls s3://two-touch/ --profile kurtis-site
 
 ```
 photo-terminal/
-├── config.py              # YAML configuration management
-├── scanner.py             # Image format validation
-├── tui.py                 # Two-pane image selector
-├── s3_browser.py          # Interactive S3 folder browser
-├── confirmation.py        # Upload confirmation prompt
-├── optimizer.py           # JPEG size-based optimization
-├── processor.py           # Batch processing pipeline
-├── duplicate_checker.py   # S3 duplicate detection
-├── uploader.py            # S3 upload with progress
-├── dry_run.py             # Dry-run mode
-├── summary.py             # Completion summary display
-├── photo_upload.py        # Main CLI application
-└── test_*.py              # Test files
+├── README.md                 # Main project documentation
+├── pyproject.toml            # Package configuration
+├── requirements.txt          # Python dependencies
+├── photo_terminal/           # Source code package
+│   ├── __init__.py
+│   ├── __main__.py          # CLI entry point
+│   ├── config.py            # YAML configuration management
+│   ├── scanner.py           # Image format validation
+│   ├── tui.py               # Two-pane image selector
+│   ├── s3_browser.py        # Interactive S3 folder browser
+│   ├── confirmation.py      # Upload confirmation prompt
+│   ├── optimizer.py         # JPEG size-based optimization
+│   ├── processor.py         # Batch processing pipeline
+│   ├── duplicate_checker.py # S3 duplicate detection
+│   ├── uploader.py          # S3 upload with progress
+│   ├── dry_run.py           # Dry-run mode
+│   └── summary.py           # Completion summary display
+├── tests/                   # Test suite
+│   └── test_*.py            # Test files
+├── examples/                # Example scripts
+│   └── example_*.py         # Usage examples
+└── docs/                    # Additional documentation
+    └── *.md                 # Module documentation
 ```
+
+See the `docs/` directory for detailed module documentation.
 
 ### Running Tests
 
@@ -368,10 +392,13 @@ photo-terminal/
 pytest -v
 
 # Run specific module tests
-pytest test_summary.py -v
+pytest tests/test_summary.py -v
 
 # Run integration tests
-pytest test_photo_upload.py::test_full_workflow_success -v
+pytest tests/test_photo_upload.py::test_full_workflow_success -v
+
+# Run with coverage
+pytest --cov=photo_terminal --cov-report=html
 ```
 
 ## Design Philosophy

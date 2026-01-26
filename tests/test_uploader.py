@@ -8,7 +8,7 @@ import io
 import pytest
 from botocore.exceptions import ClientError, BotoCoreError
 
-from uploader import (
+from photo_terminal.uploader import (
     upload_images,
     UploadError,
     _normalize_prefix,
@@ -16,7 +16,7 @@ from uploader import (
     _show_progress,
     _clear_progress
 )
-from processor import ProcessedImage
+from photo_terminal.processor import ProcessedImage
 
 
 # Test fixtures
@@ -59,7 +59,7 @@ def mock_s3_client():
 
 def test_upload_images_success(sample_processed_images, mock_s3_client):
     """Test successful upload of multiple images."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         # Setup mock session and client
         mock_session.return_value.client.return_value = mock_s3_client
 
@@ -110,7 +110,7 @@ def test_upload_images_success(sample_processed_images, mock_s3_client):
 
 def test_upload_images_empty_prefix(sample_processed_images, mock_s3_client):
     """Test upload with empty prefix."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
@@ -130,7 +130,7 @@ def test_upload_images_empty_prefix(sample_processed_images, mock_s3_client):
 
 def test_upload_images_prefix_with_trailing_slash(sample_processed_images, mock_s3_client):
     """Test upload with prefix containing trailing slash."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
@@ -161,7 +161,7 @@ def test_upload_images_empty_list():
 
 def test_upload_images_aws_session_error(sample_processed_images):
     """Test upload fails when AWS session creation fails."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         # Simulate session creation error
         mock_session.side_effect = Exception("Invalid profile")
 
@@ -176,7 +176,7 @@ def test_upload_images_aws_session_error(sample_processed_images):
 
 def test_upload_images_client_error(sample_processed_images, mock_s3_client):
     """Test upload fails immediately on AWS ClientError."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate upload failure on second image
@@ -213,7 +213,7 @@ def test_upload_images_client_error(sample_processed_images, mock_s3_client):
 
 def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
     """Test upload fails immediately on BotoCoreError."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate network error
@@ -238,7 +238,7 @@ def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
 
 def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
     """Test upload fails on generic exception."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate generic error
@@ -258,7 +258,7 @@ def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
 
 def test_upload_images_progress_feedback(sample_processed_images, mock_s3_client, capsys):
     """Test progress feedback shows spinner with count."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         upload_images(
@@ -392,7 +392,7 @@ def test_upload_single_image(tmp_path, mock_s3_client):
         warnings=[]
     )
 
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
@@ -426,7 +426,7 @@ def test_upload_preserves_original_filenames(tmp_path, mock_s3_client):
         )
         processed_images.append(processed)
 
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
@@ -456,7 +456,7 @@ def test_upload_correct_temp_paths_used(tmp_path, mock_s3_client):
         warnings=[]
     )
 
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         upload_images(
@@ -475,7 +475,7 @@ def test_upload_correct_temp_paths_used(tmp_path, mock_s3_client):
 
 def test_upload_fails_fast_preserves_temp_directory(sample_processed_images, mock_s3_client):
     """Test that temp directory is not cleaned up on upload failure."""
-    with patch('uploader.boto3.Session') as mock_session:
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate upload failure

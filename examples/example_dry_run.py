@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from PIL import Image
 
-from dry_run import dry_run_upload
+from photo_terminal.dry_run import dry_run_upload
 
 
 def create_test_images(output_dir: Path, count: int = 3) -> list[Path]:

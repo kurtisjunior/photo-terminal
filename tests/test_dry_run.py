@@ -6,14 +6,14 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 from PIL import Image
 
-from dry_run import (
+from photo_terminal.dry_run import (
     dry_run_upload,
     _print_header,
     _print_files_report,
     _print_summary,
     _print_s3_keys
 )
-from processor import ProcessedImage
+from photo_terminal.processor import ProcessedImage
 
 
 # Test fixtures
@@ -73,7 +73,7 @@ def mock_temp_dir(tmp_path):
 
 def test_dry_run_upload_exits_with_zero(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run exits with code 0 after displaying report."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit) as exc_info:
@@ -91,7 +91,7 @@ def test_dry_run_upload_exits_with_zero(sample_images, sample_processed_images, 
 
 def test_dry_run_upload_displays_header(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run displays header with target location and size."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -113,7 +113,7 @@ def test_dry_run_upload_displays_header(sample_images, sample_processed_images, 
 
 def test_dry_run_upload_with_empty_prefix(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run with empty prefix (root)."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -133,7 +133,7 @@ def test_dry_run_upload_with_empty_prefix(sample_images, sample_processed_images
 
 def test_dry_run_upload_calls_processor(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run calls process_images with correct arguments."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -151,7 +151,7 @@ def test_dry_run_upload_calls_processor(sample_images, sample_processed_images, 
 
 def test_dry_run_upload_cleans_up_temp_files(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run cleans up temp files after displaying report."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -169,7 +169,7 @@ def test_dry_run_upload_cleans_up_temp_files(sample_images, sample_processed_ima
 
 def test_dry_run_upload_cleans_up_on_error(sample_images, mock_temp_dir):
     """Test dry-run cleans up temp files even when processing fails."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         # Simulate processing error
         mock_process.side_effect = Exception("Processing failed")
 
@@ -188,7 +188,7 @@ def test_dry_run_upload_cleans_up_on_error(sample_images, mock_temp_dir):
 
 def test_dry_run_upload_displays_file_report(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run displays file-by-file report."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -215,7 +215,7 @@ def test_dry_run_upload_displays_file_report(sample_images, sample_processed_ima
 
 def test_dry_run_upload_displays_summary(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run displays summary statistics."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -239,7 +239,7 @@ def test_dry_run_upload_displays_summary(sample_images, sample_processed_images,
 
 def test_dry_run_upload_displays_s3_keys(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run displays S3 keys that would be created."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -264,7 +264,7 @@ def test_dry_run_upload_displays_s3_keys(sample_images, sample_processed_images,
 
 def test_dry_run_upload_displays_completion_message(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run displays completion message."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
@@ -302,7 +302,7 @@ def test_dry_run_upload_shows_warnings(tmp_path, mock_temp_dir, capsys):
         warnings=['target_size_not_reached: Could not reach target size']
     )
 
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, [processed_with_warning])
 
         with pytest.raises(SystemExit):
@@ -336,7 +336,7 @@ def test_dry_run_upload_single_file(sample_images, mock_temp_dir, capsys):
         warnings=[]
     )
 
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, [single_processed])
 
         with pytest.raises(SystemExit):
@@ -357,7 +357,7 @@ def test_dry_run_upload_single_file(sample_images, mock_temp_dir, capsys):
 
 def test_dry_run_upload_processing_feedback(sample_images, sample_processed_images, mock_temp_dir, capsys):
     """Test dry-run shows processing feedback."""
-    with patch('dry_run.process_images') as mock_process:
+    with patch('photo_terminal.dry_run.process_images') as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):

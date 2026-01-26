@@ -9,9 +9,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import tempfile
 
-from config import Config
-from processor import ProcessedImage
-from summary import show_completion_summary
+from photo_terminal.config import Config
+from photo_terminal.processor import ProcessedImage
+from photo_terminal.summary import show_completion_summary
 
 
 def main():

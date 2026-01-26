@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 from PIL import Image
 
-from config import load_config, Config
-from photo_upload import main
+from photo_terminal.config import load_config, Config
+from photo_terminal.__main__ import main
 
 
 @pytest.fixture
@@ -24,16 +24,16 @@ def folder_with_images(tmp_path):
     return tmp_path
 
 
-@patch('photo_upload.upload_images')
-@patch('photo_upload.process_images')
-@patch('photo_upload.check_for_duplicates')
-@patch('photo_upload.confirm_upload', return_value=True)
-@patch('photo_upload.browse_s3_folders', return_value='test/prefix/')
-@patch('tui.check_viu_availability', return_value=True)
-@patch('tui.ImageSelector.run')
+@patch('photo_terminal.__main__.upload_images')
+@patch('photo_terminal.__main__.process_images')
+@patch('photo_terminal.__main__.check_for_duplicates')
+@patch('photo_terminal.__main__.confirm_upload', return_value=True)
+@patch('photo_terminal.__main__.browse_s3_folders', return_value='test/prefix/')
+@patch('photo_terminal.tui.check_viu_availability', return_value=True)
+@patch('photo_terminal.tui.ImageSelector.run')
 def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, folder_with_images, capsys):
     """Test that CLI properly integrates with config module."""
-    from processor import ProcessedImage
+    from photo_terminal.processor import ProcessedImage
     import tempfile
 
     # Mock TUI to return selected images
@@ -65,7 +65,7 @@ def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mo
 
     test_args = ['photo_upload.py', str(folder_with_images), '--prefix', 'test/prefix']
 
-    with patch('photo_upload.load_config', return_value=test_cfg):
+    with patch('photo_terminal.__main__.load_config', return_value=test_cfg):
         with patch.object(sys, 'argv', test_args):
             result = main()
 
@@ -82,16 +82,16 @@ def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mo
     mock_temp_dir.cleanup()
 
 
-@patch('photo_upload.upload_images')
-@patch('photo_upload.process_images')
-@patch('photo_upload.check_for_duplicates')
-@patch('photo_upload.confirm_upload', return_value=True)
-@patch('photo_upload.browse_s3_folders', return_value='test/')
-@patch('tui.check_viu_availability', return_value=True)
-@patch('tui.ImageSelector.run')
+@patch('photo_terminal.__main__.upload_images')
+@patch('photo_terminal.__main__.process_images')
+@patch('photo_terminal.__main__.check_for_duplicates')
+@patch('photo_terminal.__main__.confirm_upload', return_value=True)
+@patch('photo_terminal.__main__.browse_s3_folders', return_value='test/')
+@patch('photo_terminal.tui.check_viu_availability', return_value=True)
+@patch('photo_terminal.tui.ImageSelector.run')
 def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, folder_with_images, capsys):
     """Test that CLI arguments override config file values."""
-    from processor import ProcessedImage
+    from photo_terminal.processor import ProcessedImage
     import tempfile
 
     # Mock TUI to return selected images
@@ -128,7 +128,7 @@ def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, m
         '--target-size', '600'
     ]
 
-    with patch('photo_upload.load_config', return_value=test_cfg):
+    with patch('photo_terminal.__main__.load_config', return_value=test_cfg):
         with patch.object(sys, 'argv', test_args):
             result = main()
 
@@ -146,10 +146,10 @@ def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, m
     mock_temp_dir.cleanup()
 
 
-@patch('photo_upload.confirm_upload', return_value=True)
-@patch('photo_upload.browse_s3_folders', return_value='test/')
-@patch('tui.check_viu_availability', return_value=True)
-@patch('tui.ImageSelector.run')
+@patch('photo_terminal.__main__.confirm_upload', return_value=True)
+@patch('photo_terminal.__main__.browse_s3_folders', return_value='test/')
+@patch('photo_terminal.tui.check_viu_availability', return_value=True)
+@patch('photo_terminal.tui.ImageSelector.run')
 def test_dry_run_flag_integration(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, folder_with_images, capsys):
     """Test that dry-run flag is properly handled."""
     # Mock TUI to return selected images
@@ -168,7 +168,7 @@ def test_dry_run_flag_integration(mock_run, mock_viu_check, mock_browse_s3, mock
         '--dry-run'
     ]
 
-    with patch('photo_upload.load_config', return_value=test_cfg):
+    with patch('photo_terminal.__main__.load_config', return_value=test_cfg):
         with patch.object(sys, 'argv', test_args):
             result = main()
 

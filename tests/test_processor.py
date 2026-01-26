@@ -8,7 +8,7 @@ import io
 import pytest
 from PIL import Image
 
-from processor import (
+from photo_terminal.processor import (
     process_images,
     ProcessedImage,
     ProcessingError,
@@ -56,7 +56,7 @@ def test_process_images_success(sample_images, mock_optimize_result):
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images, target_size_kb=400)
@@ -101,7 +101,7 @@ def test_process_images_with_warnings(sample_images):
         output_path.touch()
         return mock_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images, target_size_kb=400)
@@ -119,7 +119,7 @@ def test_process_images_preserves_original_filenames(sample_images, mock_optimiz
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images)
@@ -140,7 +140,7 @@ def test_process_images_empty_list_fails():
 
 def test_process_images_optimizer_failure(sample_images):
     """Test that optimizer failure raises ProcessingError."""
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = ValueError("Cannot open image")
 
         with pytest.raises(ProcessingError) as exc_info:
@@ -157,7 +157,7 @@ def test_process_images_progress_feedback(sample_images, mock_optimize_result, c
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images)
@@ -174,7 +174,7 @@ def test_process_images_progress_feedback(sample_images, mock_optimize_result, c
 
 def test_process_images_temp_directory_persistence_on_failure(sample_images):
     """Test that temp directory is not cleaned up on failure."""
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         # First image succeeds, second fails
         mock_optimize.side_effect = [
             {
@@ -202,7 +202,7 @@ def test_process_images_custom_target_size(sample_images, mock_optimize_result):
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images, target_size_kb=500)
@@ -221,7 +221,7 @@ def test_process_images_calls_optimizer_with_correct_paths(sample_images, mock_o
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images)
@@ -245,7 +245,7 @@ def test_check_disk_space_sufficient():
     images = [Mock(spec=Path)]
     images[0].stat.return_value = Mock(st_size=1000000)  # 1MB
 
-    with patch('processor.shutil.disk_usage') as mock_disk_usage:
+    with patch('photo_terminal.processor.shutil.disk_usage') as mock_disk_usage:
         # Mock 100MB available
         mock_disk_usage.return_value = Mock(free=100 * 1024 * 1024)
 
@@ -258,7 +258,7 @@ def test_check_disk_space_insufficient():
     images = [Mock(spec=Path)]
     images[0].stat.return_value = Mock(st_size=100 * 1024 * 1024)  # 100MB
 
-    with patch('processor.shutil.disk_usage') as mock_disk_usage:
+    with patch('photo_terminal.processor.shutil.disk_usage') as mock_disk_usage:
         # Mock only 10MB available (need 150MB with 1.5x margin)
         mock_disk_usage.return_value = Mock(free=10 * 1024 * 1024)
 
@@ -280,7 +280,7 @@ def test_check_disk_space_multiple_images():
         mock_img.stat.return_value = Mock(st_size=10 * 1024 * 1024)  # 10MB each
         images.append(mock_img)
 
-    with patch('processor.shutil.disk_usage') as mock_disk_usage:
+    with patch('photo_terminal.processor.shutil.disk_usage') as mock_disk_usage:
         # Total size: 50MB, needed with margin: 75MB
         # Mock 100MB available - should pass
         mock_disk_usage.return_value = Mock(free=100 * 1024 * 1024)
@@ -299,7 +299,7 @@ def test_check_disk_space_calculates_safety_margin():
     images = [Mock(spec=Path)]
     images[0].stat.return_value = Mock(st_size=100 * 1024 * 1024)  # 100MB
 
-    with patch('processor.shutil.disk_usage') as mock_disk_usage:
+    with patch('photo_terminal.processor.shutil.disk_usage') as mock_disk_usage:
         # Need 150MB with 1.5x margin
         # Test with exactly 150MB - should pass
         mock_disk_usage.return_value = Mock(free=150 * 1024 * 1024)
@@ -313,7 +313,7 @@ def test_check_disk_space_calculates_safety_margin():
 
 def test_process_images_fails_on_insufficient_disk_space(sample_images):
     """Test that processing fails fast on insufficient disk space."""
-    with patch('processor.shutil.disk_usage') as mock_disk_usage:
+    with patch('photo_terminal.processor.shutil.disk_usage') as mock_disk_usage:
         # Mock insufficient space
         mock_disk_usage.return_value = Mock(free=1024)  # 1KB
 
@@ -385,7 +385,7 @@ def test_process_images_clears_progress_line(sample_images, mock_optimize_result
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images)
@@ -405,7 +405,7 @@ def test_process_images_temp_directory_prefix(sample_images, mock_optimize_resul
         output_path.touch()
         return mock_optimize_result
 
-    with patch('processor.optimize_image') as mock_optimize:
+    with patch('photo_terminal.processor.optimize_image') as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
         temp_dir, processed = process_images(sample_images)

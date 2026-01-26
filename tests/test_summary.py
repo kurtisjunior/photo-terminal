@@ -5,8 +5,8 @@ from pathlib import Path
 from io import StringIO
 import sys
 
-from summary import show_completion_summary, _format_size
-from processor import ProcessedImage
+from photo_terminal.summary import show_completion_summary, _format_size
+from photo_terminal.processor import ProcessedImage
 
 
 @pytest.fixture

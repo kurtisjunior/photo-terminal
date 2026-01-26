@@ -6,7 +6,7 @@ import io
 
 import pytest
 
-from confirmation import confirm_upload
+from photo_terminal.confirmation import confirm_upload
 
 
 @pytest.fixture

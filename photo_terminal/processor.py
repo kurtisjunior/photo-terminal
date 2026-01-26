@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
-from optimizer import optimize_image
+from photo_terminal.optimizer import optimize_image
 
 
 @dataclass

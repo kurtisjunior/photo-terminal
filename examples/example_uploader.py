@@ -10,8 +10,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from processor import ProcessedImage
-from uploader import upload_images, UploadError
+from photo_terminal.processor import ProcessedImage
+from photo_terminal.uploader import upload_images, UploadError
 
 
 def create_sample_processed_images():

@@ -12,7 +12,7 @@ from typing import List
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from processor import ProcessedImage
+from photo_terminal.processor import ProcessedImage
 
 
 # Spinner animation frames

@@ -7,7 +7,7 @@ while preserving EXIF data and aspect ratio.
 
 from pathlib import Path
 import tempfile
-from optimizer import optimize_image
+from photo_terminal.optimizer import optimize_image
 
 
 def main():

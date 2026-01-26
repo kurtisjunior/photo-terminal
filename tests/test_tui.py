@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from tui import (
+from photo_terminal.tui import (
     ImageSelector,
     check_viu_availability,
     fail_viu_not_found,
@@ -29,14 +29,14 @@ def sample_images(tmp_path):
 class TestViuAvailability:
     """Tests for viu availability checking."""
 
-    @patch("tui.shutil.which")
+    @patch("photo_terminal.tui.shutil.which")
     def test_check_viu_available(self, mock_which):
         """Test viu availability check when viu is found."""
         mock_which.return_value = "/usr/local/bin/viu"
         assert check_viu_availability() is True
         mock_which.assert_called_once_with("viu")
 
-    @patch("tui.shutil.which")
+    @patch("photo_terminal.tui.shutil.which")
     def test_check_viu_not_available(self, mock_which):
         """Test viu availability check when viu is not found."""
         mock_which.return_value = None
@@ -59,7 +59,7 @@ class TestViuAvailability:
 class TestViuPreview:
     """Tests for viu preview generation."""
 
-    @patch("tui.subprocess.run")
+    @patch("photo_terminal.tui.subprocess.run")
     def test_get_viu_preview_success(self, mock_run, tmp_path):
         """Test successful viu preview generation."""
         img_path = tmp_path / "test.jpg"
@@ -83,7 +83,7 @@ class TestViuPreview:
         assert "20" in call_args
         assert str(img_path) in call_args
 
-    @patch("tui.subprocess.run")
+    @patch("photo_terminal.tui.subprocess.run")
     def test_get_viu_preview_failure(self, mock_run, tmp_path):
         """Test viu preview generation when viu fails."""
         img_path = tmp_path / "test.jpg"
@@ -100,7 +100,7 @@ class TestViuPreview:
         assert "[Error rendering preview]" in result
         assert "viu error message" in result
 
-    @patch("tui.subprocess.run")
+    @patch("photo_terminal.tui.subprocess.run")
     def test_get_viu_preview_timeout(self, mock_run, tmp_path):
         """Test viu preview generation with timeout."""
         img_path = tmp_path / "test.jpg"
@@ -113,7 +113,7 @@ class TestViuPreview:
 
         assert "[Preview timed out]" in result
 
-    @patch("tui.subprocess.run")
+    @patch("photo_terminal.tui.subprocess.run")
     def test_get_viu_preview_exception(self, mock_run, tmp_path):
         """Test viu preview generation with general exception."""
         img_path = tmp_path / "test.jpg"
@@ -201,8 +201,8 @@ class TestImageSelector:
 
         assert selected == []
 
-    @patch("tui.ImageSelector.create_file_list_panel")
-    @patch("tui.ImageSelector.create_preview_panel")
+    @patch("photo_terminal.tui.ImageSelector.create_file_list_panel")
+    @patch("photo_terminal.tui.ImageSelector.create_preview_panel")
     def test_create_layout(self, mock_preview, mock_file_list, sample_images):
         """Test layout creation."""
         selector = ImageSelector(sample_images)
@@ -228,7 +228,7 @@ class TestImageSelector:
         # Panel title should show selection count
         assert "1/3" in panel.title
 
-    @patch("tui.get_viu_preview")
+    @patch("photo_terminal.tui.get_viu_preview")
     def test_create_preview_panel(self, mock_viu, sample_images):
         """Test preview panel creation."""
         selector = ImageSelector(sample_images)
@@ -244,7 +244,7 @@ class TestImageSelector:
 class TestSelectImages:
     """Tests for select_images function."""
 
-    @patch("tui.check_viu_availability")
+    @patch("photo_terminal.tui.check_viu_availability")
     def test_select_images_viu_not_available(self, mock_check, sample_images):
         """Test select_images when viu is not available."""
         mock_check.return_value = False
@@ -254,7 +254,7 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("tui.check_viu_availability")
+    @patch("photo_terminal.tui.check_viu_availability")
     def test_select_images_no_images(self, mock_check):
         """Test select_images with no images."""
         mock_check.return_value = True
@@ -264,8 +264,8 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("tui.check_viu_availability")
-    @patch("tui.ImageSelector")
+    @patch("photo_terminal.tui.check_viu_availability")
+    @patch("photo_terminal.tui.ImageSelector")
     def test_select_images_user_cancels(self, mock_selector_class, mock_check, sample_images):
         """Test select_images when user cancels."""
         mock_check.return_value = True
@@ -280,8 +280,8 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("tui.check_viu_availability")
-    @patch("tui.ImageSelector")
+    @patch("photo_terminal.tui.check_viu_availability")
+    @patch("photo_terminal.tui.ImageSelector")
     def test_select_images_success(self, mock_selector_class, mock_check, sample_images):
         """Test successful image selection."""
         mock_check.return_value = True
@@ -296,8 +296,8 @@ class TestSelectImages:
 
         assert result == selected_images
 
-    @patch("tui.check_viu_availability")
-    @patch("tui.ImageSelector")
+    @patch("photo_terminal.tui.check_viu_availability")
+    @patch("photo_terminal.tui.ImageSelector")
     def test_select_images_keyboard_interrupt(self, mock_selector_class, mock_check, sample_images):
         """Test select_images when user presses Ctrl+C."""
         mock_check.return_value = True

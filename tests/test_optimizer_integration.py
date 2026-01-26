@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from optimizer import optimize_image
+from photo_terminal.optimizer import optimize_image
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ Demonstrates how to check for duplicate files in S3 before upload.
 """
 
 from pathlib import Path
-from duplicate_checker import check_for_duplicates, DuplicateFilesError
+from photo_terminal.duplicate_checker import check_for_duplicates, DuplicateFilesError
 
 
 def example_basic_usage():

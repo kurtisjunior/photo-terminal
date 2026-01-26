@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import List
 import sys
 
-from processor import process_images, ProcessedImage
-from uploader import _normalize_prefix, _construct_s3_key
+from photo_terminal.processor import process_images, ProcessedImage
+from photo_terminal.uploader import _normalize_prefix, _construct_s3_key
 
 
 def dry_run_upload(

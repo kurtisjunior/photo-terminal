@@ -5,7 +5,7 @@ Run this to verify config loading works correctly.
 
 import tempfile
 from pathlib import Path
-import config
+from photo_terminal import config
 
 
 def test_default_config_creation():

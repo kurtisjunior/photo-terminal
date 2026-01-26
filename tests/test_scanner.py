@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from scanner import scan_folder, is_valid_image, SUPPORTED_FORMATS
+from photo_terminal.scanner import scan_folder, is_valid_image, SUPPORTED_FORMATS
 
 
 class TestIsValidImage:

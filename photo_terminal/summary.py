@@ -6,7 +6,7 @@ Minimal output aligned with fail-fast philosophy.
 
 from typing import List
 
-from processor import ProcessedImage
+from photo_terminal.processor import ProcessedImage
 
 
 def show_completion_summary(

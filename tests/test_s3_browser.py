@@ -9,7 +9,7 @@ from botocore.exceptions import (
     EndpointConnectionError,
 )
 
-from s3_browser import (
+from photo_terminal.s3_browser import (
     S3AccessError,
     validate_s3_access,
     list_s3_folders,
@@ -40,7 +40,7 @@ def test_s3_access_success(mock_session, mock_s3_client):
     """Test successful S3 access validation."""
     mock_s3_client.list_objects_v2.return_value = {'Contents': []}
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         # Should not raise any exception
         validate_s3_access('test-bucket', 'test-profile')
 
@@ -52,7 +52,7 @@ def test_s3_access_success(mock_session, mock_s3_client):
 
 def test_s3_access_profile_not_found(mock_session):
     """Test error when AWS profile not found."""
-    with patch('s3_browser.boto3.Session', side_effect=ProfileNotFound(profile='test-profile')):
+    with patch('photo_terminal.s3_browser.boto3.Session', side_effect=ProfileNotFound(profile='test-profile')):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
@@ -65,7 +65,7 @@ def test_s3_access_no_credentials(mock_session, mock_s3_client):
     """Test error when AWS credentials not found."""
     mock_s3_client.list_objects_v2.side_effect = NoCredentialsError()
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
@@ -83,7 +83,7 @@ def test_s3_access_bucket_not_found(mock_session, mock_s3_client):
     }
     mock_s3_client.list_objects_v2.side_effect = ClientError(error_response, 'ListObjectsV2')
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
@@ -101,7 +101,7 @@ def test_s3_access_denied(mock_session, mock_s3_client):
     }
     mock_s3_client.list_objects_v2.side_effect = ClientError(error_response, 'ListObjectsV2')
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
@@ -115,7 +115,7 @@ def test_s3_access_network_error(mock_session, mock_s3_client):
         endpoint_url='https://s3.amazonaws.com'
     )
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
@@ -134,7 +134,7 @@ def test_list_s3_folders_root(mock_session, mock_s3_client):
         ]
     }
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         folders = list_s3_folders('test-bucket', 'test-profile', '')
 
     assert folders == ['italy', 'japan', 'spain']  # Sorted
@@ -155,7 +155,7 @@ def test_list_s3_folders_subfolder(mock_session, mock_s3_client):
         ]
     }
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         folders = list_s3_folders('test-bucket', 'test-profile', 'italy/')
 
     assert folders == ['rome', 'trapani', 'venice']  # Sorted
@@ -172,7 +172,7 @@ def test_list_s3_folders_empty(mock_session, mock_s3_client):
         'CommonPrefixes': []
     }
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         folders = list_s3_folders('test-bucket', 'test-profile', 'japan/tokyo/')
 
     assert folders == []
@@ -182,7 +182,7 @@ def test_list_s3_folders_error(mock_session, mock_s3_client):
     """Test error handling when listing folders fails."""
     mock_s3_client.list_objects_v2.side_effect = Exception("Network error")
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             list_s3_folders('test-bucket', 'test-profile', '')
 
@@ -315,7 +315,7 @@ def test_browser_drill_into_folder(mock_session, mock_s3_client):
     browser.folders = ['tokyo', 'kyoto']
     browser.current_index = 2  # First item is "Select", second is "..", third is "tokyo"
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browser.handle_selection()
 
     assert result is None  # Continue browsing
@@ -335,7 +335,7 @@ def test_browser_go_up_one_level(mock_session, mock_s3_client):
     browser.folders = []
     browser.current_index = 1  # First item is "Select", second is ".."
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browser.handle_selection()
 
     assert result is None  # Continue browsing
@@ -356,7 +356,7 @@ def test_browser_go_up_to_root(mock_session, mock_s3_client):
     browser.folders = []
     browser.current_index = 1  # First item is "Select", second is ".."
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browser.handle_selection()
 
     assert result is None  # Continue browsing
@@ -375,7 +375,7 @@ def test_browser_load_folders(mock_session, mock_s3_client):
     browser = S3FolderBrowser('test-bucket', 'test-profile')
     browser.current_index = 5  # Some arbitrary index
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         browser.load_folders()
 
     assert browser.folders == ['italy', 'japan']
@@ -388,7 +388,7 @@ def test_browse_with_cli_prefix(mock_session, mock_s3_client):
     """Test browse_s3_folders with CLI prefix (skip browser)."""
     mock_s3_client.list_objects_v2.return_value = {}
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browse_s3_folders('test-bucket', 'test-profile', 'japan/tokyo')
 
     # Should return prefix directly without showing browser
@@ -399,7 +399,7 @@ def test_browse_with_cli_prefix_already_trailing_slash(mock_session, mock_s3_cli
     """Test browse_s3_folders with CLI prefix that already has trailing slash."""
     mock_s3_client.list_objects_v2.return_value = {}
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browse_s3_folders('test-bucket', 'test-profile', 'japan/tokyo/')
 
     assert result == 'japan/tokyo/'
@@ -409,7 +409,7 @@ def test_browse_with_empty_cli_prefix(mock_session, mock_s3_client):
     """Test browse_s3_folders with empty string as CLI prefix (root)."""
     mock_s3_client.list_objects_v2.return_value = {}
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         result = browse_s3_folders('test-bucket', 'test-profile', '')
 
     assert result == ''
@@ -419,7 +419,7 @@ def test_browse_s3_access_error(mock_session, mock_s3_client):
     """Test browse_s3_folders fails when S3 access test fails."""
     mock_s3_client.list_objects_v2.side_effect = NoCredentialsError()
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         with pytest.raises(SystemExit) as exc_info:
             browse_s3_folders('test-bucket', 'test-profile')
 
@@ -431,8 +431,8 @@ def test_browse_interactive_cancelled():
     mock_browser = Mock()
     mock_browser.run.side_effect = KeyboardInterrupt()
 
-    with patch('s3_browser.validate_s3_access'):
-        with patch('s3_browser.S3FolderBrowser', return_value=mock_browser):
+    with patch('photo_terminal.s3_browser.validate_s3_access'):
+        with patch('photo_terminal.s3_browser.S3FolderBrowser', return_value=mock_browser):
             with pytest.raises(SystemExit) as exc_info:
                 browse_s3_folders('test-bucket', 'test-profile')
 
@@ -444,8 +444,8 @@ def test_browse_interactive_success():
     mock_browser = Mock()
     mock_browser.run.return_value = 'japan/tokyo/'
 
-    with patch('s3_browser.validate_s3_access'):
-        with patch('s3_browser.S3FolderBrowser', return_value=mock_browser):
+    with patch('photo_terminal.s3_browser.validate_s3_access'):
+        with patch('photo_terminal.s3_browser.S3FolderBrowser', return_value=mock_browser):
             result = browse_s3_folders('test-bucket', 'test-profile')
 
     assert result == 'japan/tokyo/'
@@ -468,7 +468,7 @@ def test_full_navigation_flow(mock_session, mock_s3_client):
 
     browser = S3FolderBrowser('test-bucket', 'test-profile')
 
-    with patch('s3_browser.boto3.Session', return_value=mock_session):
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
         # Start at root
         browser.load_folders()
         assert browser.folders == ['japan']
