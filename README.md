@@ -1,0 +1,410 @@
+# Terminal Image Upload Manager
+
+A terminal-based image upload manager with two-pane TUI interface, providing interactive file selection, inline preview, and batch JPEG optimization for S3 uploads.
+
+**Project ID**: 4d942c5e
+
+## Features
+
+- **Two-Pane TUI**: File list (left) with live viu preview (right) for image selection
+- **Interactive S3 Folder Browser**: Navigate existing S3 bucket structure to select upload target
+- **Size-Based JPEG Optimization**: Target ~400KB file size (configurable)
+- **EXIF Preservation**: Maintains camera model, date taken, and GPS coordinates
+- **Duplicate Detection**: Pre-checks S3 to prevent accidental overwrites
+- **Dry-Run Mode**: Preview size changes without uploading
+- **Fail-Fast Error Handling**: Immediate feedback on errors with no silent failures
+- **Minimal Output**: Clean terminal display with progress feedback
+- **Temp File Pipeline**: Automatic cleanup on success, persistence on failure for retry
+
+## Requirements
+
+### System Requirements
+
+- **Python 3.8+**
+- **viu** (terminal image viewer) - [Install here](https://github.com/atanunq/viu)
+- **AWS CLI** configured with credentials
+- Terminal supporting 256+ colors
+
+### Python Dependencies
+
+- Pillow (image processing)
+- boto3 (AWS S3)
+- PyYAML (configuration)
+
+## Installation
+
+### 1. Install viu
+
+**macOS (Homebrew)**:
+```bash
+brew install viu
+```
+
+**Linux (Cargo)**:
+```bash
+cargo install viu
+```
+
+**Other platforms**: See [viu installation guide](https://github.com/atanunq/viu#installation)
+
+### 2. Install Python Dependencies
+
+```bash
+pip install pillow boto3 pyyaml
+```
+
+### 3. Configure AWS CLI
+
+```bash
+aws configure --profile kurtis-site
+```
+
+Enter your AWS credentials when prompted. Make sure your profile has permissions for:
+- `s3:ListBucket` (to browse folders and check duplicates)
+- `s3:PutObject` (to upload images)
+
+### 4. Clone Repository
+
+```bash
+git clone <repository-url>
+cd photo-terminal
+```
+
+## Configuration
+
+On first run, a configuration file will be created at `~/.photo-uploader.yaml` with defaults:
+
+```yaml
+bucket: two-touch
+aws_profile: kurtis-site
+target_size_kb: 400
+```
+
+### Configuration Options
+
+- **bucket**: S3 bucket name for uploads
+- **aws_profile**: AWS CLI profile name to use
+- **target_size_kb**: Target file size in kilobytes for JPEG optimization
+
+All configuration values can be overridden via command-line arguments.
+
+## Usage
+
+### Basic Usage
+
+```bash
+python photo_upload.py /path/to/images --prefix japan/tokyo
+```
+
+### Command-Line Options
+
+```
+photo_upload.py <folder_path> [options]
+
+Required Arguments:
+  folder_path              Path to folder containing images
+
+Optional Arguments:
+  --prefix PREFIX          S3 prefix/folder path (e.g., "japan/tokyo")
+                          If omitted, interactive S3 browser will launch
+  --target-size KB         Target file size in KB (default: 400)
+  --dry-run               Preview without uploading
+```
+
+### Examples
+
+**Upload with specific prefix**:
+```bash
+python photo_upload.py ./vacation-photos --prefix italy/trapani
+```
+
+**Upload with interactive folder browser**:
+```bash
+python photo_upload.py ./vacation-photos
+# Launches interactive S3 folder browser
+```
+
+**Use custom target size**:
+```bash
+python photo_upload.py ./photos --prefix spain/barcelona --target-size 500
+```
+
+**Dry-run to preview changes**:
+```bash
+python photo_upload.py ./photos --prefix france/paris --dry-run
+```
+
+## Workflow
+
+The application follows this workflow:
+
+1. **Load Configuration**: Reads `~/.photo-uploader.yaml`
+2. **Parse CLI Arguments**: Overrides config values if specified
+3. **Scan Folder**: Validates images (JPEG, PNG, WEBP, TIFF, BMP, GIF)
+4. **Select Images**: Two-pane TUI with live preview
+5. **Browse S3 Folders**: Interactive folder browser (if --prefix not specified)
+6. **Confirm Upload**: Shows count and target location
+7. **Dry-Run Check**: If --dry-run flag set, shows preview and exits
+8. **Check Duplicates**: Pre-validates no files exist in S3 target
+9. **Process Images**: Optimizes with JPEG quality iteration
+10. **Upload to S3**: Batch upload with progress spinner
+11. **Show Summary**: Displays completion statistics
+12. **Cleanup**: Removes temp files on success
+
+## Dry-Run Mode
+
+Use `--dry-run` to preview what would happen without actually uploading:
+
+```bash
+python photo_upload.py ./photos --prefix test --dry-run
+```
+
+Output shows:
+- Files to be processed
+- Original → Processed sizes
+- Reduction percentages
+- S3 keys that would be created
+- Summary statistics
+
+No S3 operations are performed in dry-run mode.
+
+## Interactive TUI Controls
+
+### Image Selection Screen
+
+- **Arrow Keys** (↑/↓): Navigate file list
+- **Spacebar**: Toggle selection
+- **Enter**: Confirm selection and proceed
+- **q**: Quit without uploading
+
+### S3 Folder Browser
+
+- **Arrow Keys** (↑/↓): Navigate folders
+- **Enter**: Select folder / Navigate into subfolder
+- **Backspace**: Go up one level
+- **q**: Cancel and exit
+
+## Supported Image Formats
+
+- JPEG (.jpg, .jpeg)
+- PNG (.png)
+- WEBP (.webp)
+- TIFF (.tif, .tiff)
+- BMP (.bmp)
+- GIF (.gif)
+
+**Note**: RAW formats (CR2, NEF, ARW) are not supported.
+
+## Error Handling
+
+The application follows a fail-fast philosophy:
+
+### Common Errors
+
+**viu not installed**:
+```
+Error: viu is not installed or not in PATH
+Install viu to enable image preview: https://github.com/atanunq/viu
+```
+
+**AWS credentials missing**:
+```
+Error: Failed to initialize AWS session with profile 'kurtis-site'
+Make sure AWS CLI is configured with: aws configure --profile kurtis-site
+```
+
+**Duplicate files in S3**:
+```
+Error: The following files already exist in s3://two-touch/japan/tokyo/:
+  - image1.jpg
+  - image2.jpg
+
+Aborting to prevent overwrites. No files were uploaded.
+```
+
+**Insufficient disk space**:
+```
+Error: Insufficient disk space for processing.
+Needed: 150.0MB, Available: 50.0MB
+```
+
+**Upload failure**:
+```
+Error: Failed to upload 'image.jpg' to s3://two-touch/test/image.jpg
+AWS Error [AccessDenied]: Access Denied
+
+Upload failed. Temp files preserved for retry.
+```
+
+### Retry After Failure
+
+If an upload fails, temp files are preserved in `/tmp/photo_upload_*`. You can retry by running the same command again. Processing will be skipped if temp files exist from a previous run.
+
+## Completion Summary
+
+After successful upload, a summary is displayed:
+
+```
+UPLOAD COMPLETE
+═══════════════════════════════════════════════
+
+Files uploaded:    15
+Original size:     72.5 MB
+Processed size:    5.8 MB
+Total savings:     66.7 MB (92.0%)
+
+Location: s3://two-touch/japan/tokyo/
+
+Uploaded files:
+  - image1.jpg → japan/tokyo/image1.jpg
+  - image2.jpg → japan/tokyo/image2.jpg
+  - ...
+```
+
+## EXIF Preservation
+
+The optimizer preserves the following EXIF fields:
+- **Make**: Camera manufacturer
+- **Model**: Camera model
+- **DateTimeOriginal**: Date photo was taken
+- **DateTime**: Date file was modified
+- **DateTimeDigitized**: Date photo was digitized
+- **GPSInfo**: GPS coordinates
+
+Other EXIF data may be lost during JPEG recompression.
+
+## Optimization Strategy
+
+The optimizer uses iterative JPEG quality adjustment to reach target file size:
+
+1. Checks if original is already smaller than target → uses quality 95
+2. Otherwise, tries quality levels: 95, 90, 85, 80, 75, 70, 65, 60
+3. Stops at first quality level that reaches target size
+4. If target not reached even at quality 60, saves at minimum quality with warning
+
+Images are converted to RGB if necessary (e.g., RGBA with transparency composited on white background).
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest test_photo_upload.py -v
+
+# Run with coverage
+pytest --cov=. --cov-report=html
+```
+
+## Troubleshooting
+
+### viu preview not working
+
+**Check viu installation**:
+```bash
+which viu
+viu --version
+```
+
+**Test viu manually**:
+```bash
+viu /path/to/test/image.jpg
+```
+
+### AWS permission errors
+
+**Check AWS configuration**:
+```bash
+aws s3 ls s3://two-touch/ --profile kurtis-site
+```
+
+**Verify IAM permissions** for your AWS user:
+- `s3:ListBucket` on bucket
+- `s3:PutObject` on bucket
+- `s3:GetObject` on bucket (for duplicate checking)
+
+### Images not appearing in scan
+
+**Check supported formats**: Only JPEG, PNG, WEBP, TIFF, BMP, GIF are supported.
+
+**Check file permissions**: Make sure images are readable.
+
+### Upload is slow
+
+**Large images**: Processing high-resolution images takes time. The optimizer must iteratively test different JPEG quality levels.
+
+**Network speed**: Upload speed depends on your internet connection and AWS region.
+
+**Parallel uploads**: Currently uploads are sequential. This is intentional for fail-fast behavior.
+
+## Development
+
+### Project Structure
+
+```
+photo-terminal/
+├── config.py              # YAML configuration management
+├── scanner.py             # Image format validation
+├── tui.py                 # Two-pane image selector
+├── s3_browser.py          # Interactive S3 folder browser
+├── confirmation.py        # Upload confirmation prompt
+├── optimizer.py           # JPEG size-based optimization
+├── processor.py           # Batch processing pipeline
+├── duplicate_checker.py   # S3 duplicate detection
+├── uploader.py            # S3 upload with progress
+├── dry_run.py             # Dry-run mode
+├── summary.py             # Completion summary display
+├── photo_upload.py        # Main CLI application
+└── test_*.py              # Test files
+```
+
+### Running Tests
+
+```bash
+# Run all tests with verbose output
+pytest -v
+
+# Run specific module tests
+pytest test_summary.py -v
+
+# Run integration tests
+pytest test_photo_upload.py::test_full_workflow_success -v
+```
+
+## Design Philosophy
+
+### Fail-Fast
+
+- Pre-validate everything before processing
+- No retry logic on errors
+- Immediate failure on duplicates
+- Test S3 access on startup
+
+### Minimal Output
+
+- Spinner + count during upload
+- Completion summary with filenames
+- No verbose mode or debug logging
+
+### No Over-Engineering
+
+- Manual selection only (no batch shortcuts)
+- Preserve original filenames
+- No automatic folder creation
+- No CDN integration (handled by website)
+- No size variants (user's site script handles this)
+
+## License
+
+See project repository for license information.
+
+## Credits
+
+Built with:
+- [viu](https://github.com/atanunq/viu) - Terminal image viewer
+- [Pillow](https://python-pillow.org/) - Image processing
+- [boto3](https://boto3.amazonaws.com/) - AWS SDK
+- [PyYAML](https://pyyaml.org/) - Configuration management
