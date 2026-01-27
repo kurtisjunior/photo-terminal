@@ -28,8 +28,8 @@ class TerminalCapabilities:
     """Detect and manage terminal graphics capabilities.
 
     This class provides methods to detect which graphics protocol (if any) the
-    current terminal supports for inline image rendering. Detection is heuristic-based
-    and may produce false positives on older terminal versions.
+    current terminal supports for inline image rendering. Detection is automatic and
+    heuristic-based, and may produce false positives on older terminal versions.
 
     Supported terminals:
     - iTerm2 (iTerm2 inline image protocol)
@@ -39,66 +39,41 @@ class TerminalCapabilities:
     - All other terminals (Unicode block fallback)
 
     Important notes:
-    - Detection is based on environment variables and may not be 100% accurate
+    - Detection is automatic based on environment variables
     - Older versions of terminals may be detected as supporting protocols they don't
-    - Terminal multiplexers (tmux, screen) typically don't support graphics protocols
-
-    Environment Variables:
-    - PHOTO_TERMINAL_HD_PREVIEW: Control graphics protocol usage
-        * 'blocks': Force block mode (default for safety)
-        * 'auto': Proceed with normal detection logic
-        * 'force': Force graphics protocol, skip multiplexer check, return first detected
-          protocol (iterm/kitty/sixel), or 'blocks' if none found
+    - Terminal multiplexers (tmux, screen) force block mode as fallback
     """
 
     @staticmethod
     def detect_graphics_protocol() -> str:
         """Detect which graphics protocol is supported by the terminal.
 
-        Detection order:
-        1. Check PHOTO_TERMINAL_HD_PREVIEW environment variable:
-           - 'blocks': Return 'blocks' immediately
-           - 'auto': Continue with normal detection
-           - 'force': Skip multiplexer check, detect protocol, return first match or 'blocks'
-           - Invalid/unset: Default to 'blocks' for safety
-        2. Check for terminal multiplexers (tmux/screen) - forces 'blocks' if detected
-        3. Check TERM_PROGRAM for iTerm2 - returns 'iterm' if detected
-        4. Check TERM_PROGRAM for Ghostty or 'ghostty' in TERM - returns 'kitty' if detected
-        5. Check TERM for Kitty - returns 'kitty' if detected
-        6. Check TERM for Sixel - returns 'sixel' if detected
-        7. Fallback to 'blocks' for universal compatibility
+        Automatic detection order:
+        1. Check for terminal multiplexers (tmux/screen) - forces 'blocks' if detected
+        2. Check TERM_PROGRAM for iTerm2 - returns 'iterm' if detected
+        3. Check TERM_PROGRAM for Ghostty or 'ghostty' in TERM - returns 'kitty' if detected
+        4. Check TERM for Kitty - returns 'kitty' if detected
+        5. Check TERM for Sixel - returns 'sixel' if detected
+        6. Fallback to 'blocks' for universal compatibility
 
         Note: These are heuristic checks based on environment variables. They may
         false-positive on older terminal versions that set these variables but don't
         fully support the graphics protocols. Ghostty supports the Kitty graphics
         protocol, so it returns 'kitty' when detected.
 
+        Terminal multiplexers (tmux, screen) typically don't support graphics protocols,
+        so they force block mode as a fallback.
+
         Returns:
             str: One of 'iterm', 'kitty', 'sixel', or 'blocks'
         """
-        # Check PHOTO_TERMINAL_HD_PREVIEW environment variable first
-        hd_preview_mode = os.environ.get('PHOTO_TERMINAL_HD_PREVIEW', 'blocks').lower()
-
-        # Validate the environment variable value
-        if hd_preview_mode not in ('blocks', 'auto', 'force'):
-            logger.warning(
-                f"Invalid PHOTO_TERMINAL_HD_PREVIEW value '{hd_preview_mode}'. "
-                "Valid values are 'blocks', 'auto', or 'force'. Defaulting to 'blocks'."
-            )
-            hd_preview_mode = 'blocks'
-
-        # Handle 'blocks' mode - return immediately
-        if hd_preview_mode == 'blocks':
+        # Check for terminal multiplexers first
+        # TMUX is set when inside tmux, STY is set when inside GNU screen
+        # They typically break graphics protocols
+        if os.environ.get('TMUX') or os.environ.get('STY'):
             return 'blocks'
 
-        # For 'auto' mode, check for terminal multiplexers first
-        # They typically break graphics protocols
-        if hd_preview_mode == 'auto':
-            # TMUX is set when inside tmux, STY is set when inside GNU screen
-            if os.environ.get('TMUX') or os.environ.get('STY'):
-                return 'blocks'
-
-        # For both 'auto' and 'force' modes, proceed with protocol detection
+        # Proceed with protocol detection
         term_program = os.environ.get('TERM_PROGRAM', '')
         term = os.environ.get('TERM', '')
 
@@ -221,6 +196,7 @@ class ImageSelector:
         self.selected_indices = set()  # Set of selected image indices
         self.current_index = 0  # Currently highlighted image
         self.console = Console(color_system="truecolor", force_terminal=True)
+        self._first_render = True  # Track first render for graphics protocol mode
 
     def toggle_selection(self) -> None:
         """Toggle selection state of current image."""
@@ -384,33 +360,53 @@ class ImageSelector:
         """Render TUI using graphics protocol for HD images.
 
         Layout: Sequential (file list above, image below)
-        Chosen for simplicity; side-by-side might be possible but would
-        require careful cursor placement and avoiding overlap.
-        """
-        # Clear screen
-        sys.stdout.write('\033[2J\033[H')
-        sys.stdout.flush()
 
+        Rendering strategy to eliminate flickering:
+        - First render: Clear entire screen, render file list + image
+        - Subsequent renders: Move cursor to top, re-render file list in place,
+          then clear and update only the image area below
+        - This approach updates the cursor/selection without full screen flash
+        """
         # Calculate dimensions
         terminal_size = os.get_terminal_size()
         terminal_width = terminal_size.columns
         terminal_height = terminal_size.lines
 
-        # File list takes top portion
-        file_list_height = min(len(self.images) + 8, terminal_height // 2)
+        # File list takes top portion - compact to give images more space
+        # Images get 75-80% of vertical space (like macOS Finder Quick Look)
+        file_list_height = min(len(self.images) + 4, max(10, terminal_height // 5))
         image_height = terminal_height - file_list_height - 2
         image_width = terminal_width - 4
 
-        # Render file list at top
+        if self._first_render:
+            # First render: Clear entire screen
+            sys.stdout.write('\033[2J\033[H')
+            sys.stdout.flush()
+            self._first_render = False
+        else:
+            # Subsequent renders: Move cursor to home without clearing
+            sys.stdout.write('\033[H')
+            sys.stdout.flush()
+
+        # Render file list at top (always, to show cursor changes)
         narrow_console = Console(width=terminal_width - 2, force_terminal=True)
         with narrow_console.capture() as capture:
             narrow_console.print(self.create_file_list_panel())
         file_list_output = capture.get()
+        file_list_lines = file_list_output.splitlines()
+
+        # Calculate image start row
+        image_start_row = len(file_list_lines) + 2
+
+        # Write file list
         sys.stdout.write(file_list_output)
         sys.stdout.write('\n')
+
+        # Clear from current position to end of screen (clears old image)
+        sys.stdout.write('\033[J')
         sys.stdout.flush()
 
-        # Position cursor for image and stream viu output directly
+        # Render new image
         current_image = self.images[self.current_index]
 
         # CRITICAL: Stream to stdout directly, no capture

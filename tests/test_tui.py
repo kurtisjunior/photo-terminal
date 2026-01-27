@@ -419,35 +419,34 @@ class TestTerminalCapabilities:
 
     def test_detect_iterm2(self):
         """Test iTerm2 detection via TERM_PROGRAM environment variable."""
-        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
 
     def test_detect_kitty_xterm_kitty(self):
         """Test Kitty detection via TERM='xterm-kitty'."""
-        with patch.dict(os.environ, {'TERM': 'xterm-kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-kitty'}, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
 
     def test_detect_kitty_term(self):
         """Test Kitty detection via TERM='kitty'."""
-        with patch.dict(os.environ, {'TERM': 'kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'kitty'}, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
 
     def test_detect_sixel(self):
         """Test Sixel detection via TERM containing 'sixel'."""
-        with patch.dict(os.environ, {'TERM': 'xterm-sixel', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-sixel'}, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
 
     def test_fallback_to_blocks(self):
         """Test fallback to blocks for standard terminals."""
-        with patch.dict(os.environ, {'TERM': 'xterm-256color', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-256color'}, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
 
     def test_tmux_forces_blocks_with_iterm(self):
         """Test that TMUX environment variable forces blocks even with iTerm2."""
         with patch.dict(os.environ, {
             'TERM_PROGRAM': 'iTerm.app',
-            'TMUX': '/tmp/tmux-501/default,12345,0',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TMUX': '/tmp/tmux-501/default,12345,0'
         }, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
 
@@ -455,77 +454,36 @@ class TestTerminalCapabilities:
         """Test that STY environment variable (GNU screen) forces blocks even with Kitty."""
         with patch.dict(os.environ, {
             'TERM': 'xterm-kitty',
-            'STY': '12345.pts-0.hostname',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'STY': '12345.pts-0.hostname'
         }, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
 
     def test_supports_inline_images_true_iterm(self):
         """Test supports_inline_images returns True for iTerm2."""
-        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_true_kitty(self):
         """Test supports_inline_images returns True for Kitty."""
-        with patch.dict(os.environ, {'TERM': 'xterm-kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-kitty'}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_true_sixel(self):
         """Test supports_inline_images returns True for Sixel."""
-        with patch.dict(os.environ, {'TERM': 'xterm-sixel', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-sixel'}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_false_blocks(self):
         """Test supports_inline_images returns False for block mode."""
-        with patch.dict(os.environ, {'TERM': 'xterm-256color', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+        with patch.dict(os.environ, {'TERM': 'xterm-256color'}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is False
 
-    def test_hd_preview_blocks_override(self):
-        """Test PHOTO_TERMINAL_HD_PREVIEW='blocks' forces block mode."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'blocks'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
-
-    def test_hd_preview_auto_with_iterm(self):
-        """Test PHOTO_TERMINAL_HD_PREVIEW='auto' enables protocol detection."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
-
-    def test_hd_preview_force_skips_multiplexer_check(self):
-        """Test PHOTO_TERMINAL_HD_PREVIEW='force' skips multiplexer check."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'TMUX': '/tmp/tmux-501/default,12345,0',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'force'
-        }, clear=True):
-            # With 'force', iTerm should be detected even with TMUX set
-            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
-
-    def test_hd_preview_invalid_value_defaults_to_blocks(self):
-        """Test invalid PHOTO_TERMINAL_HD_PREVIEW value defaults to blocks."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'invalid_value'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
-
-    def test_hd_preview_default_when_unset(self):
-        """Test default behavior when PHOTO_TERMINAL_HD_PREVIEW is not set."""
-        # When not set, it defaults to 'blocks' for safety
-        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
 
     def test_priority_order_iterm_over_kitty(self):
         """Test that iTerm2 detection takes priority when both indicators are present."""
         with patch.dict(os.environ, {
             'TERM_PROGRAM': 'iTerm.app',
-            'TERM': 'xterm-kitty',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TERM': 'xterm-kitty'
         }, clear=True):
             # iTerm2 should be detected first
             assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
@@ -533,24 +491,21 @@ class TestTerminalCapabilities:
     def test_kitty_substring_detection(self):
         """Test that 'kitty' substring in TERM is detected."""
         with patch.dict(os.environ, {
-            'TERM': 'something-kitty-variant',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TERM': 'something-kitty-variant'
         }, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
 
     def test_sixel_substring_detection(self):
         """Test that 'sixel' substring in TERM is detected."""
         with patch.dict(os.environ, {
-            'TERM': 'mlterm-sixel',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TERM': 'mlterm-sixel'
         }, clear=True):
             assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
 
     def test_detect_ghostty_term_program(self):
         """Test Ghostty detection via TERM_PROGRAM='ghostty' should return 'kitty'."""
         with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'ghostty',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TERM_PROGRAM': 'ghostty'
         }, clear=True):
             # Ghostty supports Kitty graphics protocol
             assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
@@ -558,8 +513,7 @@ class TestTerminalCapabilities:
     def test_detect_ghostty_in_term(self):
         """Test Ghostty detection via TERM containing 'ghostty' should return 'kitty'."""
         with patch.dict(os.environ, {
-            'TERM': 'xterm-ghostty',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TERM': 'xterm-ghostty'
         }, clear=True):
             # Ghostty supports Kitty graphics protocol
             assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
@@ -568,8 +522,7 @@ class TestTerminalCapabilities:
         """Test that TMUX forces blocks even with Ghostty."""
         with patch.dict(os.environ, {
             'TERM_PROGRAM': 'ghostty',
-            'TMUX': '/tmp/tmux-501/default,12345,0',
-            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+            'TMUX': '/tmp/tmux-501/default,12345,0'
         }, clear=True):
             # Multiplexers break graphics protocols
             assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
