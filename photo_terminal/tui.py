@@ -367,12 +367,12 @@ class ImageSelector:
     def render_with_graphics_protocol(self):
         """Render TUI using graphics protocol for HD images.
 
-        Layout: Sequential (file list above, image below)
+        Layout: Side-by-side (file list left, image right) - macOS Finder style
 
         Rendering strategy to eliminate flickering:
         - First render: Clear entire screen, render file list + image
         - Subsequent renders: Move cursor to top, re-render file list in place,
-          then clear and update only the image area below
+          then clear and update only the image area
         - This approach updates the cursor/selection without full screen flash
         """
         # Calculate dimensions
@@ -380,11 +380,11 @@ class ImageSelector:
         terminal_width = terminal_size.columns
         terminal_height = terminal_size.lines
 
-        # File list takes top portion - compact to give images more space
-        # Images get 75-80% of vertical space (like macOS Finder Quick Look)
-        file_list_height = min(len(self.images) + 4, max(10, terminal_height // 5))
-        image_height = terminal_height - file_list_height - 2
-        image_width = terminal_width - 4
+        # Side-by-side layout: file list on left, image on right
+        file_list_width = 55  # Fixed width for file list
+        image_column = 60     # Where image starts (column position)
+        image_width = terminal_width - image_column - 2  # Right side only
+        image_height = terminal_height - 2  # Full height
 
         if self._first_render:
             # First render: Clear entire screen
@@ -396,22 +396,25 @@ class ImageSelector:
             sys.stdout.write('\033[H')
             sys.stdout.flush()
 
-        # Render file list at top (always, to show cursor changes)
-        narrow_console = Console(width=terminal_width - 2, force_terminal=True)
+        # Render file list at left (always, to show cursor changes)
+        narrow_console = Console(width=file_list_width, force_terminal=True)
         with narrow_console.capture() as capture:
             narrow_console.print(self.create_file_list_panel())
         file_list_output = capture.get()
         file_list_lines = file_list_output.splitlines()
 
-        # Calculate image start row
-        image_start_row = len(file_list_lines) + 2
-
-        # Write file list
-        sys.stdout.write(file_list_output)
-        sys.stdout.write('\n')
-
-        # Clear from current position to end of screen (clears old image)
+        # Clear screen (for refreshing both panes)
         sys.stdout.write('\033[J')
+
+        # Write file list line-by-line on left side
+        for row, line in enumerate(file_list_lines, start=1):
+            sys.stdout.write(f'\033[{row};1H')  # Position at row, column 1
+            sys.stdout.write(line)
+
+        sys.stdout.flush()
+
+        # Position cursor at top-right where image should render
+        sys.stdout.write(f'\033[1;{image_column}H')
         sys.stdout.flush()
 
         # Render new image
