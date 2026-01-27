@@ -302,18 +302,26 @@ class ImageSelector:
             - File list: Column 1-55 (left side)
             - Image preview: Column 70+ (right side)
         """
-        # Clear screen and move to top
-        sys.stdout.write('\033[2J\033[H')
+        # Anti-flicker optimization: only clear screen on first render
+        if self._first_render:
+            # First render: Clear entire screen
+            sys.stdout.write('\033[2J\033[H')
+            self._first_render = False
+        else:
+            # Subsequent renders: Move cursor to home without clearing
+            sys.stdout.write('\033[H')
         sys.stdout.flush()
 
         # Get current image
         current_image = self.images[self.current_index]
 
-        # Fixed dimensions
+        # Calculate dimensions dynamically based on terminal size
+        terminal_size = os.get_terminal_size()
         file_list_column = 1   # Start file list at column 1 (left)
-        image_column = 70      # Start image at column 70 (right)
-        image_width = 100      # Large width - blocks are inherently low-res
-        image_height = 50      # Large height - blocks are inherently low-res
+        file_list_width = 55
+        image_column = file_list_width + 5  # Start image after file list with spacing
+        image_width = max(20, min(terminal_size.columns - image_column - 2, 60))
+        image_height = max(10, min(terminal_size.lines - 5, 35))
 
         # Get the image lines with blocks (viu 1.6.1 only supports blocks)
         viu_lines = []
@@ -412,12 +420,16 @@ class ImageSelector:
         # CRITICAL: Stream to stdout directly, no capture
         # This preserves the binary graphics protocol escape sequences
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["viu", "-w", str(image_width), "-h", str(image_height), str(current_image)],
                 stdout=sys.stdout,  # Direct stream
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 timeout=5
             )
+            if result.returncode != 0 and result.stderr:
+                error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+                sys.stdout.write(f"\n[Preview error: {error_msg}]\n")
+                sys.stdout.flush()
         except subprocess.TimeoutExpired:
             sys.stdout.write("[Preview timed out]")
         except Exception as e:
@@ -472,10 +484,7 @@ class ImageSelector:
 
         # Check viu availability
         if not check_viu_availability():
-            print("Warning: viu not found. Install with: brew install viu")
-            print("Continuing without image preview...")
-            import time
-            time.sleep(2)
+            fail_viu_not_found()
 
         # Save terminal settings
         fd = sys.stdin.fileno()
