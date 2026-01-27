@@ -196,6 +196,94 @@ No S3 operations are performed in dry-run mode.
 - **Backspace**: Go up one level
 - **q**: Cancel and exit
 
+## HD Preview Mode (Experimental)
+
+### Overview
+
+The TUI supports two preview rendering modes:
+
+- **Blocks mode (default)**: Uses Unicode characters (▄▀) for universal compatibility. Produces pixelated but reliable output in all terminals.
+- **HD mode (experimental)**: Uses terminal graphics protocols for higher-fidelity image previews in supported terminals.
+
+HD mode provides sharper, more detailed image previews when using terminals that support inline graphics protocols (iTerm2, Kitty, Ghostty). The feature is opt-in and automatically falls back to blocks mode if graphics protocol support is unavailable.
+
+### Terminal Compatibility
+
+| Terminal | Graphics Protocol | Auto-Detection | Notes |
+|----------|------------------|----------------|-------|
+| iTerm2 (macOS) | ✓ Supported | ✓ Works with auto/force | Inline images protocol |
+| Kitty | ✓ Supported | ✓ Works with auto/force | Kitty graphics protocol |
+| Ghostty | ✓ Supported | ✓ Works with auto/force | Uses Kitty graphics protocol |
+| Alacritty | ✗ Blocks fallback | N/A | No graphics protocol support |
+| Terminal.app | ✗ Blocks fallback | N/A | No graphics protocol support |
+| xterm | ✗ Blocks fallback | N/A | Sixel only if compiled with support |
+| tmux/screen | ✗ Blocks fallback | N/A | Graphics protocols don't work through multiplexers |
+
+**Note:** When using tmux or screen (terminal multiplexers), graphics protocols are not supported. The application will automatically fall back to blocks mode.
+
+### Environment Variable
+
+Control HD preview mode using the `PHOTO_TERMINAL_HD_PREVIEW` environment variable:
+
+- **`blocks` (default)**: Always use Unicode blocks. Safe and universally compatible.
+- **`auto`**: Auto-detect terminal capabilities. Uses graphics protocol if detected, falls back to blocks otherwise.
+- **`force`**: Force graphics protocol detection and skip multiplexer checks. Use when you know your terminal supports graphics protocols.
+
+### Layout Differences
+
+The two rendering modes use different layouts:
+
+**Blocks mode (side-by-side)**:
+```
+┌─────────────────────┐  ┌──────────────────┐
+│ File List (left)    │  │ Preview (right)  │
+│ [✓] image1.jpg      │  │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │
+│ [ ] image2.jpg      │  │ ▄▄▀▀▀▀▀▀▀▀▀▀▄▄▄ │
+│ [ ] image3.jpg      │  │ (pixelated)      │
+└─────────────────────┘  └──────────────────┘
+```
+
+**HD mode (sequential)**:
+```
+┌─────────────────────────────────────┐
+│ File List (top)                     │
+│ [✓] image1.jpg                      │
+│ [ ] image2.jpg                      │
+└─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│ High-resolution preview (bottom)    │
+│ [Sharp, detailed image rendering]   │
+└─────────────────────────────────────┘
+```
+
+Graphics protocols render the entire image at once and cannot be interleaved with text line-by-line, requiring a sequential layout.
+
+### Usage Examples
+
+**Default mode (blocks - safe and compatible)**:
+```bash
+photo-upload ./photos --prefix test
+```
+
+**Enable auto-detection**:
+```bash
+PHOTO_TERMINAL_HD_PREVIEW=auto photo-upload ./photos --prefix test
+```
+
+**Force HD mode**:
+```bash
+# Use when you know your terminal supports graphics protocols
+PHOTO_TERMINAL_HD_PREVIEW=force photo-upload ./photos --prefix test
+```
+
+### Limitations
+
+- **tmux/screen**: Graphics protocols do not work through terminal multiplexers. Use `PHOTO_TERMINAL_HD_PREVIEW=blocks` when working in tmux/screen.
+- **Terminal version**: Older versions of iTerm2, Kitty, or Ghostty may not support graphics protocols. The application will fall back to blocks mode if detection fails.
+- **Layout**: HD mode uses sequential layout (file list above, image below) instead of side-by-side layout.
+- **Performance**: Large images may take longer to render in HD mode. A 5-second timeout is enforced with fallback to error message.
+
 ## Supported Image Formats
 
 - JPEG (.jpg, .jpeg)
@@ -313,6 +401,40 @@ pytest --cov=photo_terminal --cov-report=html
 
 ## Troubleshooting
 
+### HD Preview Issues
+
+**Graphics protocol not working**:
+
+If HD mode doesn't work even with `PHOTO_TERMINAL_HD_PREVIEW=auto` or `force`:
+
+1. **Check terminal compatibility**: Not all terminals support graphics protocols. See the Terminal Compatibility table above.
+
+2. **Verify terminal version**: Older versions of iTerm2, Kitty, or Ghostty may lack graphics support. Update to the latest version.
+
+3. **Check for multiplexer**: Graphics protocols don't work through tmux or screen. If you're inside a multiplexer session:
+   ```bash
+   # Check if you're in tmux
+   echo $TMUX
+
+   # Check if you're in screen
+   echo $STY
+   ```
+   If either prints a value, you're in a multiplexer. Use `PHOTO_TERMINAL_HD_PREVIEW=blocks` or exit the multiplexer.
+
+4. **Force blocks mode**: If auto-detection fails, explicitly use blocks mode:
+   ```bash
+   PHOTO_TERMINAL_HD_PREVIEW=blocks photo-upload ./photos --prefix test
+   ```
+
+5. **Check terminal environment variables**:
+   ```bash
+   echo $TERM
+   echo $TERM_PROGRAM
+   ```
+   iTerm2 should show `TERM_PROGRAM=iTerm.app`. Kitty should show `TERM=xterm-kitty`. Ghostty should show `TERM_PROGRAM=ghostty`.
+
+**Layout preference**: If you prefer side-by-side layout over HD quality, use blocks mode (default).
+
 ### viu preview not working
 
 **Check viu installation**:
@@ -426,7 +548,9 @@ pytest --cov=photo_terminal --cov-report=html
 
 ## License
 
-See project repository for license information.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+The MIT License is a permissive open source license that allows commercial use, modification, and distribution with minimal restrictions. It only requires attribution and inclusion of the license notice.
 
 ## Credits
 

@@ -12,6 +12,8 @@ Example:
 """
 
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 
@@ -83,6 +85,23 @@ def print_effective_config(cfg, args, folder_path: Path) -> None:
 
 def main():
     """Main CLI entry point."""
+    # Enable debug logging if environment variable is set
+    if os.environ.get('PHOTO_TERMINAL_DEBUG'):
+        logging.basicConfig(
+            filename='/tmp/photo_terminal_debug.log',
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            force=True
+        )
+        # Also log to console
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        logging.getLogger().addHandler(console_handler)
+
+        logging.info("=== Photo Terminal Debug Mode ===")
+        logging.info(f"Terminal: {os.environ.get('TERM', 'unknown')}")
+        logging.info(f"TERM_PROGRAM: {os.environ.get('TERM_PROGRAM', 'unknown')}")
+
     # Load configuration from YAML file
     try:
         cfg = load_config()

@@ -6,7 +6,9 @@ Provides a terminal interface with:
 - Keyboard controls: arrows to navigate, spacebar to toggle, enter to confirm
 """
 
+import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,11 +16,121 @@ from pathlib import Path
 from typing import List, Optional
 
 from rich.console import Console, Group
-from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+class TerminalCapabilities:
+    """Detect and manage terminal graphics capabilities.
+
+    This class provides methods to detect which graphics protocol (if any) the
+    current terminal supports for inline image rendering. Detection is heuristic-based
+    and may produce false positives on older terminal versions.
+
+    Supported terminals:
+    - iTerm2 (iTerm2 inline image protocol)
+    - Ghostty (Kitty graphics protocol)
+    - Kitty (Kitty graphics protocol)
+    - Sixel-capable terminals (Sixel protocol)
+    - All other terminals (Unicode block fallback)
+
+    Important notes:
+    - Detection is based on environment variables and may not be 100% accurate
+    - Older versions of terminals may be detected as supporting protocols they don't
+    - Terminal multiplexers (tmux, screen) typically don't support graphics protocols
+
+    Environment Variables:
+    - PHOTO_TERMINAL_HD_PREVIEW: Control graphics protocol usage
+        * 'blocks': Force block mode (default for safety)
+        * 'auto': Proceed with normal detection logic
+        * 'force': Force graphics protocol, skip multiplexer check, return first detected
+          protocol (iterm/kitty/sixel), or 'blocks' if none found
+    """
+
+    @staticmethod
+    def detect_graphics_protocol() -> str:
+        """Detect which graphics protocol is supported by the terminal.
+
+        Detection order:
+        1. Check PHOTO_TERMINAL_HD_PREVIEW environment variable:
+           - 'blocks': Return 'blocks' immediately
+           - 'auto': Continue with normal detection
+           - 'force': Skip multiplexer check, detect protocol, return first match or 'blocks'
+           - Invalid/unset: Default to 'blocks' for safety
+        2. Check for terminal multiplexers (tmux/screen) - forces 'blocks' if detected
+        3. Check TERM_PROGRAM for iTerm2 - returns 'iterm' if detected
+        4. Check TERM_PROGRAM for Ghostty or 'ghostty' in TERM - returns 'kitty' if detected
+        5. Check TERM for Kitty - returns 'kitty' if detected
+        6. Check TERM for Sixel - returns 'sixel' if detected
+        7. Fallback to 'blocks' for universal compatibility
+
+        Note: These are heuristic checks based on environment variables. They may
+        false-positive on older terminal versions that set these variables but don't
+        fully support the graphics protocols. Ghostty supports the Kitty graphics
+        protocol, so it returns 'kitty' when detected.
+
+        Returns:
+            str: One of 'iterm', 'kitty', 'sixel', or 'blocks'
+        """
+        # Check PHOTO_TERMINAL_HD_PREVIEW environment variable first
+        hd_preview_mode = os.environ.get('PHOTO_TERMINAL_HD_PREVIEW', 'blocks').lower()
+
+        # Validate the environment variable value
+        if hd_preview_mode not in ('blocks', 'auto', 'force'):
+            logger.warning(
+                f"Invalid PHOTO_TERMINAL_HD_PREVIEW value '{hd_preview_mode}'. "
+                "Valid values are 'blocks', 'auto', or 'force'. Defaulting to 'blocks'."
+            )
+            hd_preview_mode = 'blocks'
+
+        # Handle 'blocks' mode - return immediately
+        if hd_preview_mode == 'blocks':
+            return 'blocks'
+
+        # For 'auto' mode, check for terminal multiplexers first
+        # They typically break graphics protocols
+        if hd_preview_mode == 'auto':
+            # TMUX is set when inside tmux, STY is set when inside GNU screen
+            if os.environ.get('TMUX') or os.environ.get('STY'):
+                return 'blocks'
+
+        # For both 'auto' and 'force' modes, proceed with protocol detection
+        term_program = os.environ.get('TERM_PROGRAM', '')
+        term = os.environ.get('TERM', '')
+
+        # iTerm2 detection (heuristic, may false-positive on older versions)
+        if term_program == 'iTerm.app':
+            return 'iterm'
+
+        # Ghostty detection (uses Kitty graphics protocol)
+        if term_program == 'ghostty' or 'ghostty' in term:
+            return 'kitty'
+
+        # Kitty detection (heuristic)
+        if 'kitty' in term or term == 'xterm-kitty':
+            return 'kitty'
+
+        # Sixel detection (heuristic; TERM doesn't guarantee sixel support)
+        if 'sixel' in term:
+            return 'sixel'
+
+        # Fallback to blocks for universal compatibility
+        return 'blocks'
+
+    @staticmethod
+    def supports_inline_images() -> bool:
+        """Check if terminal supports any inline image protocol.
+
+        Returns:
+            bool: True if terminal supports iTerm2, Kitty, or Sixel protocols,
+                  False if only block-mode rendering is available
+        """
+        protocol = TerminalCapabilities.detect_graphics_protocol()
+        return protocol in ('iterm', 'kitty', 'sixel')
 
 
 def check_viu_availability() -> bool:
@@ -48,37 +160,51 @@ def fail_viu_not_found() -> None:
     raise SystemExit(1)
 
 
-def get_viu_preview(image_path: Path, width: int, height: int) -> str:
+def get_viu_preview(image_path: Path, width: int, height: int = None) -> str:
     """Generate viu preview output for an image.
 
     Args:
         image_path: Path to image file
         width: Width in characters for preview
-        height: Height in characters for preview
+        height: Maximum height in lines (optional, will be cropped if exceeded)
 
     Returns:
         String containing viu output with ANSI escape codes
     """
+    logger.debug(f"get_viu_preview: {image_path.name}, width={width}, height={height}")
     try:
         # Run viu with appropriate flags
-        # -w: width in terminal columns
-        # -h: height in terminal rows
-        # -t: transparent background
+        # -b: force block output (ANSI colors instead of graphics protocols)
+        # -w: width in terminal columns (viu will calculate height for aspect ratio)
+        # Don't use -h to let viu maintain proper aspect ratio, crop afterwards if needed
+        logger.debug("Running viu subprocess...")
         result = subprocess.run(
-            ["viu", "-w", str(width), "-h", str(height), "-t", str(image_path)],
+            ["viu", "-b", "-w", str(width), str(image_path)],
             capture_output=True,
             text=True,
             timeout=5
         )
+        logger.debug(f"viu completed with returncode={result.returncode}")
 
         if result.returncode == 0:
-            return result.stdout
+            output = result.stdout
+            logger.debug(f"viu output: {len(output)} chars, {len(output.splitlines())} lines")
+            # Crop to max height if specified
+            if height:
+                lines = output.splitlines()
+                if len(lines) > height:
+                    output = "\n".join(lines[:height])
+                    logger.debug(f"Cropped to {height} lines")
+            return output
         else:
+            logger.error(f"viu failed: {result.stderr}")
             return f"[Error rendering preview]\n{result.stderr}"
 
     except subprocess.TimeoutExpired:
+        logger.error("viu timed out")
         return "[Preview timed out]"
     except Exception as e:
+        logger.error(f"viu exception: {e}", exc_info=True)
         return f"[Preview error: {e}]"
 
 
@@ -94,7 +220,7 @@ class ImageSelector:
         self.images = images
         self.selected_indices = set()  # Set of selected image indices
         self.current_index = 0  # Currently highlighted image
-        self.console = Console()
+        self.console = Console(color_system="truecolor", force_terminal=True)
 
     def toggle_selection(self) -> None:
         """Toggle selection state of current image."""
@@ -128,6 +254,8 @@ class ImageSelector:
         Returns:
             Panel containing the file list
         """
+        logger.debug(f"create_file_list_panel: {len(self.images)} images, current={self.current_index}")
+
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column("checkbox", width=3)
         table.add_column("filename", overflow="ellipsis")
@@ -152,54 +280,186 @@ class ImageSelector:
 
             table.add_row(checkbox_text, filename_text)
 
+        # Add current image info
+        current_image = self.images[self.current_index]
+        info_text = Text()
+        info_text.append("\n" + "─" * 40 + "\n", style="dim")
+        info_text.append(f"Current: {current_image.name}\n\n", style="cyan")
+
         # Add controls footer
         controls_text = Text()
-        controls_text.append("\n" + "─" * 30 + "\n", style="dim")
         controls_text.append("↑/↓: Navigate  Space: Toggle\n", style="dim")
         controls_text.append("Enter: Confirm  q/Esc: Cancel", style="dim")
 
         title = f"Images ({len(self.selected_indices)}/{len(self.images)} selected)"
-        return Panel(Group(table, controls_text), title=title, border_style="blue")
+        logger.debug(f"Panel created with title: {title}")
+        return Panel(Group(table, info_text, controls_text), title=title, border_style="blue")
 
-    def create_preview_panel(self) -> Panel:
-        """Create the preview panel with viu output.
+    def create_layout(self) -> Panel:
+        """Create the file list panel (no preview due to Rich limitations).
 
         Returns:
-            Panel containing the image preview
+            Panel with file list
         """
+        logger.debug("create_layout called")
+        panel = self.create_file_list_panel()
+        logger.debug(f"Layout created: {type(panel)}")
+        return panel
+
+    def render_with_blocks(self, full_render: bool = True):
+        """Render the TUI using block mode (Unicode blocks with ANSI colors).
+
+        This is the block-mode renderer that uses viu's -b flag to generate
+        colored Unicode characters (▄▀) for image preview. It uses a side-by-side
+        layout with the file list on the left and image preview on the right.
+
+        This works because block output is line-based text - each line of viu output
+        can be positioned independently using ANSI cursor positioning escape codes,
+        allowing the file list and image to be rendered side-by-side.
+
+        Args:
+            full_render: If True, performs a full screen clear and render.
+                        If False, performs partial update (currently unused but kept
+                        for future optimization to reduce flicker).
+
+        Layout:
+            - File list: Column 1-55 (left side)
+            - Image preview: Column 70+ (right side)
+        """
+        # Clear screen and move to top
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
+
+        # Get current image
         current_image = self.images[self.current_index]
 
-        # Get terminal size to calculate preview dimensions
-        terminal_width = self.console.width or 80
-        terminal_height = self.console.height or 24
+        # Fixed dimensions
+        file_list_column = 1   # Start file list at column 1 (left)
+        image_column = 70      # Start image at column 70 (right)
+        image_width = 100      # Large width - blocks are inherently low-res
+        image_height = 50      # Large height - blocks are inherently low-res
 
-        # Reserve space for file list (left pane) and borders
-        # File list takes ~40% of width, preview takes ~60%
-        preview_width = int(terminal_width * 0.5)
-        preview_height = terminal_height - 10  # Reserve space for panels and controls
+        # Get the image lines with blocks (viu 1.6.1 only supports blocks)
+        viu_lines = []
+        if check_viu_availability():
+            try:
+                # Use blocks - this viu version (1.6.1) doesn't support graphics protocols
+                # Blocks are low-res by nature, but larger size helps
+                result = subprocess.run(
+                    ["viu", "-b", "-w", str(image_width), "-h", str(image_height), str(current_image)],
+                    capture_output=True,
+                    text=False,
+                    timeout=5
+                )
 
-        # Get viu preview
-        preview = get_viu_preview(current_image, preview_width, preview_height)
+                if result.returncode == 0:
+                    viu_lines = result.stdout.decode('utf-8', errors='replace').splitlines()
+            except Exception as e:
+                logger.error(f"viu preview failed: {e}")
+                viu_lines = [f"[Preview error: {e}]"]
 
-        title = f"Preview: {current_image.name}"
-        return Panel(preview, title=title, border_style="green")
+        # Get file list lines (rendered to max 55 chars wide to not overlap image)
+        narrow_console = Console(width=55, force_terminal=True)
+        with narrow_console.capture() as capture:
+            narrow_console.print(self.create_file_list_panel())
+        file_list_lines = capture.get().splitlines()
 
-    def create_layout(self) -> Layout:
-        """Create the two-pane layout.
+        # Render both side-by-side using cursor positioning
+        max_lines = max(len(file_list_lines), len(viu_lines))
 
-        Returns:
-            Layout with file list and preview panels
+        for row in range(max_lines):
+            # Position and print file list line on the left
+            if row < len(file_list_lines):
+                sys.stdout.write(f'\033[{row + 1};{file_list_column}H')
+                sys.stdout.write(file_list_lines[row])
+
+            # Position and print image line on the right
+            if row < len(viu_lines):
+                sys.stdout.write(f'\033[{row + 1};{image_column}H')
+                sys.stdout.write(viu_lines[row])
+
+        sys.stdout.flush()
+
+    def render_with_graphics_protocol(self):
+        """Render TUI using graphics protocol for HD images.
+
+        Layout: Sequential (file list above, image below)
+        Chosen for simplicity; side-by-side might be possible but would
+        require careful cursor placement and avoiding overlap.
         """
-        layout = Layout()
-        layout.split_row(
-            Layout(name="file_list", ratio=2),
-            Layout(name="preview", ratio=3)
-        )
+        # Clear screen
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
 
-        layout["file_list"].update(self.create_file_list_panel())
-        layout["preview"].update(self.create_preview_panel())
+        # Calculate dimensions
+        terminal_size = os.get_terminal_size()
+        terminal_width = terminal_size.columns
+        terminal_height = terminal_size.lines
 
-        return layout
+        # File list takes top portion
+        file_list_height = min(len(self.images) + 8, terminal_height // 2)
+        image_height = terminal_height - file_list_height - 2
+        image_width = terminal_width - 4
+
+        # Render file list at top
+        narrow_console = Console(width=terminal_width - 2, force_terminal=True)
+        with narrow_console.capture() as capture:
+            narrow_console.print(self.create_file_list_panel())
+        file_list_output = capture.get()
+        sys.stdout.write(file_list_output)
+        sys.stdout.write('\n')
+        sys.stdout.flush()
+
+        # Position cursor for image and stream viu output directly
+        current_image = self.images[self.current_index]
+
+        # CRITICAL: Stream to stdout directly, no capture
+        # This preserves the binary graphics protocol escape sequences
+        try:
+            subprocess.run(
+                ["viu", "-w", str(image_width), "-h", str(image_height), str(current_image)],
+                stdout=sys.stdout,  # Direct stream
+                stderr=subprocess.DEVNULL,
+                timeout=5
+            )
+        except subprocess.TimeoutExpired:
+            sys.stdout.write("[Preview timed out]")
+        except Exception as e:
+            sys.stdout.write(f"[Preview error: {e}]")
+
+        sys.stdout.flush()
+
+    def render_with_preview(self, full_render: bool = True):
+        """Render the TUI with appropriate method based on terminal capabilities.
+
+        This is the main dispatcher that routes rendering to the appropriate renderer
+        based on the detected graphics protocol support. It maintains backward
+        compatibility while enabling high-fidelity image previews when available.
+
+        Rendering paths:
+        - Graphics protocol path (iterm/kitty/sixel): Always performs full render
+          using render_with_graphics_protocol(). Graphics protocols render images
+          as atomic escape sequences that can't be partially updated.
+
+        - Block mode path (fallback): Uses render_with_blocks() with configurable
+          full_render parameter. Block mode uses colored Unicode characters (▄▀)
+          that are line-based text and support partial rendering for future
+          optimization (currently always full render).
+
+        Args:
+            full_render: If True, performs full screen clear and render.
+                        If False, performs partial update (block mode only).
+                        Note: Graphics protocol path always does full render
+                        regardless of this parameter.
+        """
+        protocol = TerminalCapabilities.detect_graphics_protocol()
+
+        if protocol in ('iterm', 'kitty', 'sixel'):
+            # Graphics protocol path - always full render
+            self.render_with_graphics_protocol()
+        else:
+            # Block mode path - supports partial rendering
+            self.render_with_blocks(full_render=full_render)
 
     def run(self) -> Optional[List[Path]]:
         """Run the interactive selector.
@@ -214,56 +474,82 @@ class ImageSelector:
         import tty
         import termios
 
+        # Check viu availability
+        if not check_viu_availability():
+            print("Warning: viu not found. Install with: brew install viu")
+            print("Continuing without image preview...")
+            import time
+            time.sleep(2)
+
         # Save terminal settings
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+
+        logger.info("Starting TUI selector")
 
         try:
             # Set terminal to raw mode for key capture
             tty.setraw(fd)
 
-            with Live(self.create_layout(), console=self.console, refresh_per_second=4) as live:
-                while True:
-                    # Read a single character
-                    char = sys.stdin.read(1)
+            # Hide cursor
+            sys.stdout.write('\033[?25l')
+            sys.stdout.flush()
 
-                    # Handle escape sequences (arrow keys)
-                    if char == '\x1b':  # ESC
-                        next_char = sys.stdin.read(1)
-                        if next_char == '[':
-                            arrow = sys.stdin.read(1)
-                            if arrow == 'A':  # Up arrow
-                                self.move_up()
-                            elif arrow == 'B':  # Down arrow
-                                self.move_down()
-                        else:
-                            # Escape key pressed (without arrow)
-                            raise SystemExit(1)
+            # Initial render
+            self.render_with_preview()
 
-                    # Handle other keys
-                    elif char == ' ':  # Spacebar
-                        self.toggle_selection()
-                    elif char == '\r' or char == '\n':  # Enter
-                        selected = self.get_selected_images()
-                        if not selected:
-                            # No images selected, continue
-                            continue
-                        return selected
-                    elif char == 'q' or char == 'Q':  # Quit
-                        raise SystemExit(1)
-                    elif char == '\x03':  # Ctrl+C
-                        raise KeyboardInterrupt
+            while True:
+                # Read a single character
+                char = sys.stdin.read(1)
 
-                    # Update the display
-                    live.update(self.create_layout())
+                # Handle escape sequences (arrow keys)
+                if char == '\x1b':  # ESC
+                    next_char = sys.stdin.read(1)
+                    if next_char == '[':
+                        arrow = sys.stdin.read(1)
+                        if arrow == 'A':  # Up arrow
+                            logger.debug("Up arrow pressed")
+                            self.move_up()
+                        elif arrow == 'B':  # Down arrow
+                            logger.debug("Down arrow pressed")
+                            self.move_down()
+                    else:
+                        # Escape key pressed (without arrow)
+                        logger.info("Escape pressed, exiting")
+                        return None
+
+                # Handle other keys
+                elif char == ' ':  # Spacebar
+                    logger.debug("Space pressed")
+                    self.toggle_selection()
+                elif char == '\r' or char == '\n':  # Enter
+                    logger.info("Enter pressed")
+                    selected = self.get_selected_images()
+                    if not selected:
+                        # No images selected, continue
+                        logger.warning("No images selected")
+                        continue
+                    return selected
+                elif char == 'q' or char == 'Q':  # Quit
+                    logger.info("Q pressed, exiting")
+                    return None
+                elif char == '\x03':  # Ctrl+C
+                    logger.info("Ctrl+C pressed")
+                    raise KeyboardInterrupt
+
+                # Redraw with new preview
+                self.render_with_preview()
 
         finally:
             # Restore terminal settings
+            sys.stdout.write('\033[?25h')  # Show cursor
+            sys.stdout.write('\033[2J\033[H')  # Clear screen
+            sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def select_images(images: List[Path]) -> List[Path]:
-    """Interactive image selection with two-pane TUI.
+    """Interactive image selection with TUI.
 
     Args:
         images: List of valid image paths from scanner
@@ -272,29 +558,33 @@ def select_images(images: List[Path]) -> List[Path]:
         List of selected image paths
 
     Raises:
-        SystemExit: If viu not available or user cancels
+        SystemExit: If user cancels
     """
-    # Check viu availability first (fail-fast)
-    if not check_viu_availability():
-        fail_viu_not_found()
+    logger.info(f"select_images called with {len(images)} images")
 
     # Validate input
     if not images:
+        logger.error("No images provided")
         print("Error: No images provided for selection")
         raise SystemExit(1)
 
     # Run interactive selector
+    logger.info("Creating ImageSelector")
     selector = ImageSelector(images)
+    logger.info("ImageSelector created, calling run()")
 
     try:
         selected = selector.run()
+        logger.info(f"Selector returned {len(selected) if selected else 0} images")
 
         if selected is None or not selected:
+            logger.info("User cancelled or no images selected")
             print("\nNo images selected")
             raise SystemExit(1)
 
         return selected
 
     except KeyboardInterrupt:
-        print("\n\nCancelled by user")
+        logger.info("KeyboardInterrupt caught")
+        print("\nCancelled by user")
         raise SystemExit(1)

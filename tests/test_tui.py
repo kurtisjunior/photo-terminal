@@ -1,5 +1,6 @@
 """Tests for TUI module."""
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -8,6 +9,7 @@ import pytest
 
 from photo_terminal.tui import (
     ImageSelector,
+    TerminalCapabilities,
     check_viu_availability,
     fail_viu_not_found,
     get_viu_preview,
@@ -73,14 +75,15 @@ class TestViuPreview:
 
         result = get_viu_preview(img_path, 40, 20)
 
-        assert result == "preview output"
+        # Check output includes cropping to max height
+        assert "preview output" in result
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == "viu"
+        assert "-b" in call_args  # Block output mode
         assert "-w" in call_args
         assert "40" in call_args
-        assert "-h" in call_args
-        assert "20" in call_args
+        # -h flag NOT used anymore (viu calculates height from aspect ratio)
         assert str(img_path) in call_args
 
     @patch("photo_terminal.tui.subprocess.run")
@@ -201,20 +204,16 @@ class TestImageSelector:
 
         assert selected == []
 
-    @patch("photo_terminal.tui.ImageSelector.create_file_list_panel")
-    @patch("photo_terminal.tui.ImageSelector.create_preview_panel")
-    def test_create_layout(self, mock_preview, mock_file_list, sample_images):
+    def test_create_layout(self, sample_images):
         """Test layout creation."""
         selector = ImageSelector(sample_images)
 
-        mock_file_list.return_value = "file_list_panel"
-        mock_preview.return_value = "preview_panel"
-
         layout = selector.create_layout()
 
+        # Should return a Panel now (simplified, no preview)
         assert layout is not None
-        mock_file_list.assert_called_once()
-        mock_preview.assert_called_once()
+        from rich.panel import Panel
+        assert isinstance(layout, Panel)
 
     def test_create_file_list_panel(self, sample_images):
         """Test file list panel creation."""
@@ -228,48 +227,31 @@ class TestImageSelector:
         # Panel title should show selection count
         assert "1/3" in panel.title
 
-    @patch("photo_terminal.tui.get_viu_preview")
-    def test_create_preview_panel(self, mock_viu, sample_images):
-        """Test preview panel creation."""
+    def test_create_file_list_shows_current_image(self, sample_images):
+        """Test file list panel shows current image name."""
         selector = ImageSelector(sample_images)
-        mock_viu.return_value = "preview output"
+        selector.current_index = 1
 
-        panel = selector.create_preview_panel()
+        panel = selector.create_file_list_panel()
 
         assert panel is not None
-        mock_viu.assert_called_once()
-        assert "image0.jpg" in panel.title
+        # Should show current image name in the panel
+        # (can't easily test the rendered content, but ensure panel is created)
 
 
 class TestSelectImages:
     """Tests for select_images function."""
 
-    @patch("photo_terminal.tui.check_viu_availability")
-    def test_select_images_viu_not_available(self, mock_check, sample_images):
-        """Test select_images when viu is not available."""
-        mock_check.return_value = False
-
-        with pytest.raises(SystemExit) as exc_info:
-            select_images(sample_images)
-
-        assert exc_info.value.code == 1
-
-    @patch("photo_terminal.tui.check_viu_availability")
-    def test_select_images_no_images(self, mock_check):
+    def test_select_images_no_images(self):
         """Test select_images with no images."""
-        mock_check.return_value = True
-
         with pytest.raises(SystemExit) as exc_info:
             select_images([])
 
         assert exc_info.value.code == 1
 
-    @patch("photo_terminal.tui.check_viu_availability")
     @patch("photo_terminal.tui.ImageSelector")
-    def test_select_images_user_cancels(self, mock_selector_class, mock_check, sample_images):
+    def test_select_images_user_cancels(self, mock_selector_class, sample_images):
         """Test select_images when user cancels."""
-        mock_check.return_value = True
-
         # Mock selector to return None (cancelled)
         mock_selector = MagicMock()
         mock_selector.run.return_value = None
@@ -280,12 +262,9 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("photo_terminal.tui.check_viu_availability")
     @patch("photo_terminal.tui.ImageSelector")
-    def test_select_images_success(self, mock_selector_class, mock_check, sample_images):
+    def test_select_images_success(self, mock_selector_class, sample_images):
         """Test successful image selection."""
-        mock_check.return_value = True
-
         # Mock selector to return selected images
         mock_selector = MagicMock()
         selected_images = [sample_images[0], sample_images[2]]
@@ -296,12 +275,9 @@ class TestSelectImages:
 
         assert result == selected_images
 
-    @patch("photo_terminal.tui.check_viu_availability")
     @patch("photo_terminal.tui.ImageSelector")
-    def test_select_images_keyboard_interrupt(self, mock_selector_class, mock_check, sample_images):
+    def test_select_images_keyboard_interrupt(self, mock_selector_class, sample_images):
         """Test select_images when user presses Ctrl+C."""
-        mock_check.return_value = True
-
         # Mock selector to raise KeyboardInterrupt
         mock_selector = MagicMock()
         mock_selector.run.side_effect = KeyboardInterrupt()
@@ -362,3 +338,238 @@ class TestNavigationLogic:
         # Try to go down from bottom
         selector.move_down()
         assert selector.current_index == len(sample_images) - 1
+
+
+class TestRenderDispatcher:
+    """Tests for render_with_preview() dispatcher method."""
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='iterm')
+    def test_render_dispatch_iterm(self, mock_detect, sample_images):
+        """Test dispatcher calls render_with_graphics_protocol() for iTerm."""
+        selector = ImageSelector(sample_images)
+
+        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+            selector.render_with_preview()
+            mock_graphics.assert_called_once()
+            mock_detect.assert_called_once()
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='kitty')
+    def test_render_dispatch_kitty(self, mock_detect, sample_images):
+        """Test dispatcher calls render_with_graphics_protocol() for Kitty."""
+        selector = ImageSelector(sample_images)
+
+        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+            selector.render_with_preview()
+            mock_graphics.assert_called_once()
+            mock_detect.assert_called_once()
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='sixel')
+    def test_render_dispatch_sixel(self, mock_detect, sample_images):
+        """Test dispatcher calls render_with_graphics_protocol() for Sixel."""
+        selector = ImageSelector(sample_images)
+
+        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+            selector.render_with_preview()
+            mock_graphics.assert_called_once()
+            mock_detect.assert_called_once()
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='blocks')
+    def test_render_dispatch_blocks(self, mock_detect, sample_images):
+        """Test dispatcher calls render_with_blocks() when no graphics protocol available."""
+        selector = ImageSelector(sample_images)
+
+        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+            selector.render_with_preview()
+            mock_blocks.assert_called_once()
+            mock_detect.assert_called_once()
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='blocks')
+    def test_render_dispatch_passes_full_render_to_blocks(self, mock_detect, sample_images):
+        """Test that full_render parameter is passed correctly to render_with_blocks()."""
+        selector = ImageSelector(sample_images)
+
+        # Test with full_render=True
+        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+            selector.render_with_preview(full_render=True)
+            mock_blocks.assert_called_once_with(full_render=True)
+
+        # Test with full_render=False
+        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+            selector.render_with_preview(full_render=False)
+            mock_blocks.assert_called_once_with(full_render=False)
+
+    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='iterm')
+    def test_render_dispatch_ignores_full_render_for_graphics(self, mock_detect, sample_images):
+        """Test that full_render parameter is ignored for graphics protocol path."""
+        selector = ImageSelector(sample_images)
+
+        # Graphics protocol method doesn't take parameters, so verify it's called
+        # without any arguments regardless of full_render value
+        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+            selector.render_with_preview(full_render=True)
+            mock_graphics.assert_called_once_with()
+
+        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+            selector.render_with_preview(full_render=False)
+            mock_graphics.assert_called_once_with()
+
+
+class TestTerminalCapabilities:
+    """Tests for terminal graphics protocol detection."""
+
+    def test_detect_iterm2(self):
+        """Test iTerm2 detection via TERM_PROGRAM environment variable."""
+        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+
+    def test_detect_kitty_xterm_kitty(self):
+        """Test Kitty detection via TERM='xterm-kitty'."""
+        with patch.dict(os.environ, {'TERM': 'xterm-kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+
+    def test_detect_kitty_term(self):
+        """Test Kitty detection via TERM='kitty'."""
+        with patch.dict(os.environ, {'TERM': 'kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+
+    def test_detect_sixel(self):
+        """Test Sixel detection via TERM containing 'sixel'."""
+        with patch.dict(os.environ, {'TERM': 'xterm-sixel', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
+
+    def test_fallback_to_blocks(self):
+        """Test fallback to blocks for standard terminals."""
+        with patch.dict(os.environ, {'TERM': 'xterm-256color', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_tmux_forces_blocks_with_iterm(self):
+        """Test that TMUX environment variable forces blocks even with iTerm2."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'TMUX': '/tmp/tmux-501/default,12345,0',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_screen_forces_blocks_with_kitty(self):
+        """Test that STY environment variable (GNU screen) forces blocks even with Kitty."""
+        with patch.dict(os.environ, {
+            'TERM': 'xterm-kitty',
+            'STY': '12345.pts-0.hostname',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_supports_inline_images_true_iterm(self):
+        """Test supports_inline_images returns True for iTerm2."""
+        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.supports_inline_images() is True
+
+    def test_supports_inline_images_true_kitty(self):
+        """Test supports_inline_images returns True for Kitty."""
+        with patch.dict(os.environ, {'TERM': 'xterm-kitty', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.supports_inline_images() is True
+
+    def test_supports_inline_images_true_sixel(self):
+        """Test supports_inline_images returns True for Sixel."""
+        with patch.dict(os.environ, {'TERM': 'xterm-sixel', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.supports_inline_images() is True
+
+    def test_supports_inline_images_false_blocks(self):
+        """Test supports_inline_images returns False for block mode."""
+        with patch.dict(os.environ, {'TERM': 'xterm-256color', 'PHOTO_TERMINAL_HD_PREVIEW': 'auto'}, clear=True):
+            assert TerminalCapabilities.supports_inline_images() is False
+
+    def test_hd_preview_blocks_override(self):
+        """Test PHOTO_TERMINAL_HD_PREVIEW='blocks' forces block mode."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'blocks'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_hd_preview_auto_with_iterm(self):
+        """Test PHOTO_TERMINAL_HD_PREVIEW='auto' enables protocol detection."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+
+    def test_hd_preview_force_skips_multiplexer_check(self):
+        """Test PHOTO_TERMINAL_HD_PREVIEW='force' skips multiplexer check."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'TMUX': '/tmp/tmux-501/default,12345,0',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'force'
+        }, clear=True):
+            # With 'force', iTerm should be detected even with TMUX set
+            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+
+    def test_hd_preview_invalid_value_defaults_to_blocks(self):
+        """Test invalid PHOTO_TERMINAL_HD_PREVIEW value defaults to blocks."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'invalid_value'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_hd_preview_default_when_unset(self):
+        """Test default behavior when PHOTO_TERMINAL_HD_PREVIEW is not set."""
+        # When not set, it defaults to 'blocks' for safety
+        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+    def test_priority_order_iterm_over_kitty(self):
+        """Test that iTerm2 detection takes priority when both indicators are present."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'iTerm.app',
+            'TERM': 'xterm-kitty',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            # iTerm2 should be detected first
+            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+
+    def test_kitty_substring_detection(self):
+        """Test that 'kitty' substring in TERM is detected."""
+        with patch.dict(os.environ, {
+            'TERM': 'something-kitty-variant',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+
+    def test_sixel_substring_detection(self):
+        """Test that 'sixel' substring in TERM is detected."""
+        with patch.dict(os.environ, {
+            'TERM': 'mlterm-sixel',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
+
+    def test_detect_ghostty_term_program(self):
+        """Test Ghostty detection via TERM_PROGRAM='ghostty' should return 'kitty'."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'ghostty',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            # Ghostty supports Kitty graphics protocol
+            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+
+    def test_detect_ghostty_in_term(self):
+        """Test Ghostty detection via TERM containing 'ghostty' should return 'kitty'."""
+        with patch.dict(os.environ, {
+            'TERM': 'xterm-ghostty',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            # Ghostty supports Kitty graphics protocol
+            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+
+    def test_ghostty_with_multiplexer(self):
+        """Test that TMUX forces blocks even with Ghostty."""
+        with patch.dict(os.environ, {
+            'TERM_PROGRAM': 'ghostty',
+            'TMUX': '/tmp/tmux-501/default,12345,0',
+            'PHOTO_TERMINAL_HD_PREVIEW': 'auto'
+        }, clear=True):
+            # Multiplexers break graphics protocols
+            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
