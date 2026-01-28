@@ -3,7 +3,11 @@
 Provides a terminal interface with:
 - File list (left pane) with checkboxes and navigation
 - Live viu preview (right pane) showing selected image
-- Keyboard controls: arrows to navigate, spacebar to toggle, y to quick select, a to select all, enter to confirm
+- Multi-stage selection workflow:
+  1. Mark images with y/Space (shows [x])
+  2. Lock selections with Enter (prevents accidental changes)
+  3. Proceed to next stage with 'n'
+- Keyboard controls: arrows to navigate, y/spacebar to mark, a to select all, enter to lock, n to proceed
 """
 
 import logging
@@ -199,6 +203,8 @@ class ImageSelector:
         self.console = Console(color_system="truecolor", force_terminal=True)
         self._first_render = True  # Track first render for graphics protocol mode
         self._image_cache = {}  # Cache for rendered image output: {image_path: output}
+        self._selections_locked = False  # Track if selections are locked
+        self._locked_indices = set()  # Store locked selection indices
 
     def _preload_image(self, index: int) -> None:
         """Pre-load image at index into cache in background.
@@ -319,7 +325,7 @@ class ImageSelector:
         for i, img in enumerate(self.images):
             # Checkbox indicator
             if i in self.selected_indices:
-                checkbox = "[✓]"
+                checkbox = "[x]"
             else:
                 checkbox = "[ ]"
 
@@ -342,10 +348,17 @@ class ImageSelector:
         info_text.append("\n" + "─" * 40 + "\n", style="dim")
         info_text.append(f"Current: {current_image.name}\n\n", style="cyan")
 
+        # Show lock status if selections are locked
+        if self._selections_locked:
+            info_text.append("✓ Selections locked - Press 'n' for next stage\n", style="bold green")
+
         # Add controls footer
         controls_text = Text()
-        controls_text.append("↑/↓ Nav  Space: Toggle  y: Quick Select  a: All\n", style="dim")
-        controls_text.append("Enter: Confirm  q/Esc: Cancel", style="dim")
+        if self._selections_locked:
+            controls_text.append("n: Next Stage  Enter: Unlock  q/Esc: Cancel", style="dim")
+        else:
+            controls_text.append("↑/↓ Nav  y/Space: Mark [x]  a: All  Enter: Lock\n", style="dim")
+            controls_text.append("q/Esc: Cancel", style="dim")
 
         title = f"Images ({len(self.selected_indices)}/{len(self.images)} selected)"
         logger.debug(f"Panel created with title: {title}")
@@ -645,17 +658,31 @@ class ImageSelector:
                     self.toggle_selection()
                 elif char == '\r' or char == '\n':  # Enter
                     logger.info("Enter pressed")
-                    selected = self.get_selected_images()
-                    if not selected:
-                        # No images selected, continue
-                        logger.warning("No images selected")
-                        continue
-                    return selected
+                    if not self._selections_locked:
+                        # Lock the selections
+                        if not self.selected_indices:
+                            # No images selected, continue
+                            logger.warning("No images selected, cannot lock")
+                            continue
+                        self._selections_locked = True
+                        self._locked_indices = self.selected_indices.copy()
+                        logger.info(f"Selections locked: {len(self._locked_indices)} images")
+                    else:
+                        # Unlock the selections
+                        self._selections_locked = False
+                        self._locked_indices = set()
+                        logger.info("Selections unlocked")
+                    # Don't return - stay in the loop
                 elif char == 'y' or char == 'Y':
-                    # Select current image and proceed immediately
-                    logger.info("'y' pressed - selecting current image and proceeding")
-                    self.selected_indices = {self.current_index}  # Clear all, select only current
-                    return self.get_selected_images()  # Return immediately
+                    # Just mark the image, don't proceed
+                    logger.info("'y' pressed - toggling selection")
+                    self.toggle_selection()
+                elif char == 'n' or char == 'N':
+                    if not self._selections_locked:
+                        logger.info("'n' pressed but selections not locked - ignoring")
+                        continue
+                    logger.info("'n' pressed - proceeding to next stage")
+                    return self.get_selected_images()
                 elif char == 'a' or char == 'A':
                     # Toggle select all
                     logger.info("'a' pressed - toggling select all")

@@ -418,15 +418,15 @@ class TestKeyboardSelection:
     """Tests for keyboard selection shortcuts."""
 
     def test_y_key_selects_current_and_proceeds(self, sample_images):
-        """Test that pressing 'y' selects only the current image and returns immediately."""
+        """Test that pressing 'y' toggles selection of current image (multi-stage workflow)."""
         selector = ImageSelector(sample_images)
         selector.current_index = 1  # Navigate to second image
 
-        # Pre-select some other images to verify they get cleared
+        # Pre-select some other images
         selector.selected_indices = {0, 2}
 
-        # Mock stdin to return 'y'
-        with patch('sys.stdin.read', side_effect=['y']):
+        # Mock stdin: 'y' to toggle, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -435,20 +435,20 @@ class TestKeyboardSelection:
                                 with patch('tty.setraw'):
                                     result = selector.run()
 
-        # Verify only img2 (index 1) is returned
-        assert result == [sample_images[1]]
-        assert selector.selected_indices == {1}
+        # Verify all three images are selected (0, 2 were already selected, 1 was toggled on)
+        assert len(result) == 3
+        assert selector.selected_indices == {0, 1, 2}
 
     def test_y_clears_other_selections(self, sample_images):
-        """Test that pressing 'y' clears other selections and returns only current."""
+        """Test that pressing 'y' toggles selection (deselects if already selected)."""
         selector = ImageSelector(sample_images)
         selector.current_index = 2  # Navigate to third image
 
         # Select all images first
         selector.selected_indices = {0, 1, 2}
 
-        # Press 'y'
-        with patch('sys.stdin.read', side_effect=['y']):
+        # Press 'y' to toggle off index 2, then Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -457,9 +457,9 @@ class TestKeyboardSelection:
                                 with patch('tty.setraw'):
                                     result = selector.run()
 
-        # Verify only img3 (index 2) is returned
-        assert result == [sample_images[2]]
-        assert selector.selected_indices == {2}
+        # Verify img3 (index 2) was toggled off, leaving 0 and 1
+        assert len(result) == 2
+        assert selector.selected_indices == {0, 1}
 
     def test_a_key_selects_all(self, sample_images):
         """Test that pressing 'a' with none selected selects all images."""
@@ -468,8 +468,8 @@ class TestKeyboardSelection:
         # Initially no selections
         assert len(selector.selected_indices) == 0
 
-        # Press 'a' then Enter to confirm
-        with patch('sys.stdin.read', side_effect=['a', '\r']):
+        # Press 'a' to select all, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -511,8 +511,8 @@ class TestKeyboardSelection:
         # Select only first image
         selector.selected_indices = {0}
 
-        # Press 'a' then Enter to confirm
-        with patch('sys.stdin.read', side_effect=['a', '\r']):
+        # Press 'a' to select all, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -547,9 +547,9 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
-        # Press spacebar twice (toggles on then off), then spacebar once more, then Enter
+        # Press spacebar twice (toggles on then off), then spacebar once more, then Enter to lock, 'n' to proceed
         # Net result: selected once
-        with patch('sys.stdin.read', side_effect=[' ', ' ', ' ', '\r']):
+        with patch('sys.stdin.read', side_effect=[' ', ' ', ' ', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -569,8 +569,8 @@ class TestKeyboardSelection:
         # Initially not selected
         assert 0 not in selector.selected_indices
 
-        # Toggle on with spacebar, then confirm with Enter
-        with patch('sys.stdin.read', side_effect=[' ', '\r']):
+        # Toggle on with spacebar, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=[' ', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -583,14 +583,14 @@ class TestKeyboardSelection:
         assert result == [sample_images[0]]
 
     def test_enter_still_works(self, sample_images):
-        """Test that Enter confirms current selections."""
+        """Test that Enter locks selections, then 'n' proceeds."""
         selector = ImageSelector(sample_images)
 
         # Pre-select some images
         selector.selected_indices = {0, 2}
 
-        # Press Enter to confirm
-        with patch('sys.stdin.read', side_effect=['\r']):
+        # Press Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -607,8 +607,8 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 0  # First image
 
-        # Press 'y'
-        with patch('sys.stdin.read', side_effect=['y']):
+        # Press 'y' to toggle, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -626,8 +626,8 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = len(sample_images) - 1  # Last image
 
-        # Press 'y'
-        with patch('sys.stdin.read', side_effect=['y']):
+        # Press 'y' to toggle, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -645,8 +645,8 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
-        # Press uppercase 'Y'
-        with patch('sys.stdin.read', side_effect=['Y']):
+        # Press uppercase 'Y' to toggle, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['Y', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
@@ -662,8 +662,8 @@ class TestKeyboardSelection:
         """Test that uppercase 'A' works the same as lowercase 'a'."""
         selector = ImageSelector(sample_images)
 
-        # Press uppercase 'A' then Enter
-        with patch('sys.stdin.read', side_effect=['A', '\r']):
+        # Press uppercase 'A' to select all, Enter to lock, 'n' to proceed
+        with patch('sys.stdin.read', side_effect=['A', '\r', 'n']):
             with patch.object(selector, 'render_with_preview'):
                 with patch('photo_terminal.tui.check_viu_availability', return_value=True):
                     with patch('sys.stdin.fileno', return_value=0):
