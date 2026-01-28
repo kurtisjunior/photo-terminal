@@ -414,6 +414,268 @@ class TestRenderDispatcher:
             mock_graphics.assert_called_once_with()
 
 
+class TestKeyboardSelection:
+    """Tests for keyboard selection shortcuts."""
+
+    def test_y_key_selects_current_and_proceeds(self, sample_images):
+        """Test that pressing 'y' selects only the current image and returns immediately."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 1  # Navigate to second image
+
+        # Pre-select some other images to verify they get cleared
+        selector.selected_indices = {0, 2}
+
+        # Mock stdin to return 'y'
+        with patch('sys.stdin.read', side_effect=['y']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify only img2 (index 1) is returned
+        assert result == [sample_images[1]]
+        assert selector.selected_indices == {1}
+
+    def test_y_clears_other_selections(self, sample_images):
+        """Test that pressing 'y' clears other selections and returns only current."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 2  # Navigate to third image
+
+        # Select all images first
+        selector.selected_indices = {0, 1, 2}
+
+        # Press 'y'
+        with patch('sys.stdin.read', side_effect=['y']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify only img3 (index 2) is returned
+        assert result == [sample_images[2]]
+        assert selector.selected_indices == {2}
+
+    def test_a_key_selects_all(self, sample_images):
+        """Test that pressing 'a' with none selected selects all images."""
+        selector = ImageSelector(sample_images)
+
+        # Initially no selections
+        assert len(selector.selected_indices) == 0
+
+        # Press 'a' then Enter to confirm
+        with patch('sys.stdin.read', side_effect=['a', '\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify all images are selected
+        assert len(result) == len(sample_images)
+        assert set(result) == set(sample_images)
+        assert selector.selected_indices == {0, 1, 2}
+
+    def test_a_key_deselects_all(self, sample_images):
+        """Test that pressing 'a' with all selected deselects all images."""
+        selector = ImageSelector(sample_images)
+
+        # Select all images first
+        selector.selected_indices = {0, 1, 2}
+
+        # Press 'a' (should deselect all), then 'q' to quit
+        with patch('sys.stdin.read', side_effect=['a', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify all selections are cleared
+        assert result is None  # quit returns None
+        assert len(selector.selected_indices) == 0
+
+    def test_a_key_with_partial_selection(self, sample_images):
+        """Test that pressing 'a' with partial selection selects all."""
+        selector = ImageSelector(sample_images)
+
+        # Select only first image
+        selector.selected_indices = {0}
+
+        # Press 'a' then Enter to confirm
+        with patch('sys.stdin.read', side_effect=['a', '\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify all images are now selected
+        assert len(result) == len(sample_images)
+        assert selector.selected_indices == {0, 1, 2}
+
+    def test_a_does_not_auto_confirm(self, sample_images):
+        """Test that pressing 'a' doesn't automatically return (needs Enter)."""
+        selector = ImageSelector(sample_images)
+
+        # Press 'a' then 'q' (not Enter)
+        with patch('sys.stdin.read', side_effect=['a', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (quit) not the selected images
+        assert result is None
+
+    def test_spacebar_still_works(self, sample_images):
+        """Test that spacebar toggles selection as expected."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 1
+
+        # Press spacebar twice (toggles on then off), then spacebar once more, then Enter
+        # Net result: selected once
+        with patch('sys.stdin.read', side_effect=[' ', ' ', ' ', '\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Spacebar three times: on, off, on = selected
+        assert result == [sample_images[1]]
+
+    def test_spacebar_toggles_selection(self, sample_images):
+        """Test that spacebar properly toggles selection on and off."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 0
+
+        # Initially not selected
+        assert 0 not in selector.selected_indices
+
+        # Toggle on with spacebar, then confirm with Enter
+        with patch('sys.stdin.read', side_effect=[' ', '\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should have selected the first image
+        assert result == [sample_images[0]]
+
+    def test_enter_still_works(self, sample_images):
+        """Test that Enter confirms current selections."""
+        selector = ImageSelector(sample_images)
+
+        # Pre-select some images
+        selector.selected_indices = {0, 2}
+
+        # Press Enter to confirm
+        with patch('sys.stdin.read', side_effect=['\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return the pre-selected images
+        assert result == [sample_images[0], sample_images[2]]
+
+    def test_y_on_first_image(self, sample_images):
+        """Test 'y' key on the first image (edge case)."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 0  # First image
+
+        # Press 'y'
+        with patch('sys.stdin.read', side_effect=['y']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return only the first image
+        assert result == [sample_images[0]]
+        assert selector.selected_indices == {0}
+
+    def test_y_on_last_image(self, sample_images):
+        """Test 'y' key on the last image (edge case)."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = len(sample_images) - 1  # Last image
+
+        # Press 'y'
+        with patch('sys.stdin.read', side_effect=['y']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return only the last image
+        assert result == [sample_images[2]]
+        assert selector.selected_indices == {2}
+
+    def test_uppercase_y_works(self, sample_images):
+        """Test that uppercase 'Y' works the same as lowercase 'y'."""
+        selector = ImageSelector(sample_images)
+        selector.current_index = 1
+
+        # Press uppercase 'Y'
+        with patch('sys.stdin.read', side_effect=['Y']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return only current image
+        assert result == [sample_images[1]]
+
+    def test_uppercase_a_works(self, sample_images):
+        """Test that uppercase 'A' works the same as lowercase 'a'."""
+        selector = ImageSelector(sample_images)
+
+        # Press uppercase 'A' then Enter
+        with patch('sys.stdin.read', side_effect=['A', '\r']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should select all images
+        assert len(result) == len(sample_images)
+
+
 class TestTerminalCapabilities:
     """Tests for terminal graphics protocol detection."""
 

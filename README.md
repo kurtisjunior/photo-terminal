@@ -170,7 +170,9 @@ No S3 operations are performed in dry-run mode.
 ### Image Selection Screen
 
 - **Arrow Keys** (↑/↓): Navigate file list
-- **Spacebar**: Toggle selection
+- **Spacebar**: Toggle selection checkbox
+- **y**: Select current image and proceed immediately (quick single-image selection)
+- **a**: Select/deselect all images at once
 - **Enter**: Confirm selection and proceed
 - **q**: Quit without uploading
 

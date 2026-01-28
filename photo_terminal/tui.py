@@ -3,7 +3,7 @@
 Provides a terminal interface with:
 - File list (left pane) with checkboxes and navigation
 - Live viu preview (right pane) showing selected image
-- Keyboard controls: arrows to navigate, spacebar to toggle, enter to confirm
+- Keyboard controls: arrows to navigate, spacebar to toggle, y to quick select, a to select all, enter to confirm
 """
 
 import logging
@@ -344,7 +344,7 @@ class ImageSelector:
 
         # Add controls footer
         controls_text = Text()
-        controls_text.append("↑/↓: Navigate  Space: Toggle\n", style="dim")
+        controls_text.append("↑/↓ Nav  Space: Toggle  y: Quick Select  a: All\n", style="dim")
         controls_text.append("Enter: Confirm  q/Esc: Cancel", style="dim")
 
         title = f"Images ({len(self.selected_indices)}/{len(self.images)} selected)"
@@ -651,6 +651,23 @@ class ImageSelector:
                         logger.warning("No images selected")
                         continue
                     return selected
+                elif char == 'y' or char == 'Y':
+                    # Select current image and proceed immediately
+                    logger.info("'y' pressed - selecting current image and proceeding")
+                    self.selected_indices = {self.current_index}  # Clear all, select only current
+                    return self.get_selected_images()  # Return immediately
+                elif char == 'a' or char == 'A':
+                    # Toggle select all
+                    logger.info("'a' pressed - toggling select all")
+                    if len(self.selected_indices) == len(self.images):
+                        # All selected, deselect all
+                        self.selected_indices = set()
+                        logger.info("Deselected all images")
+                    else:
+                        # Some or none selected, select all
+                        self.selected_indices = set(range(len(self.images)))
+                        logger.info(f"Selected all {len(self.images)} images")
+                    # Don't return - let user confirm with Enter
                 elif char == 'q' or char == 'Q':  # Quit
                     logger.info("Q pressed, exiting")
                     return None
