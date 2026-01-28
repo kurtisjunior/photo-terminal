@@ -713,6 +713,160 @@ class ImageSelector:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
+def show_processing_config(locked_images: List[Path], config: dict) -> dict:
+    """Show processing configuration screen for locked images.
+
+    Args:
+        locked_images: List of selected image paths
+        config: Configuration dict from ~/.photo-uploader.yaml
+
+    Returns:
+        Processing configuration dict with user's choices
+    """
+    import tty
+    import termios
+
+    console = Console()
+
+    # Configuration options with defaults
+    options = {
+        'resize': True,  # Apply size optimization
+        'preserve_exif': True,  # Preserve EXIF data
+    }
+
+    current_option = 0  # Currently highlighted option
+    option_keys = list(options.keys())
+
+    # Save terminal settings
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    def render_config_screen():
+        """Render the configuration screen."""
+        console.clear()
+
+        # Header
+        header = Text()
+        header.append("Processing Configuration\n", style="bold cyan")
+        header.append(f"Configure processing for {len(locked_images)} locked image(s)\n", style="dim")
+        console.print(Panel(header, border_style="cyan"))
+        console.print()
+
+        # Create options table
+        table = Table(show_header=True, box=None, padding=(0, 2))
+        table.add_column("", width=3)
+        table.add_column("Option", style="bold")
+        table.add_column("Description")
+        table.add_column("Value", justify="right")
+
+        # Resize option
+        checkbox = "[x]" if options['resize'] else "[ ]"
+        if current_option == 0:
+            table.add_row(
+                Text("►", style="bold cyan"),
+                Text("Resize images", style="bold cyan"),
+                Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB", style="cyan"),
+                Text(checkbox, style="bold cyan")
+            )
+        else:
+            table.add_row(
+                "",
+                "Resize images",
+                f"Optimize to ~{config.get('target_size_kb', 400)}KB",
+                checkbox
+            )
+
+        # EXIF preservation option
+        checkbox = "[x]" if options['preserve_exif'] else "[ ]"
+        if current_option == 1:
+            table.add_row(
+                Text("►", style="bold cyan"),
+                Text("Preserve EXIF data", style="bold cyan"),
+                Text("Keep camera, date, GPS info", style="cyan"),
+                Text(checkbox, style="bold cyan")
+            )
+        else:
+            table.add_row(
+                "",
+                "Preserve EXIF data",
+                "Keep camera, date, GPS info",
+                checkbox
+            )
+
+        # Display table in panel
+        console.print(Panel(table, title="Processing Options", border_style="blue"))
+        console.print()
+
+        # Controls
+        controls = Text()
+        controls.append("↑/↓: Navigate  ", style="dim")
+        controls.append("Space: Toggle  ", style="dim")
+        controls.append("Enter: Confirm  ", style="dim")
+        controls.append("b: Go Back  ", style="dim")
+        controls.append("q/Esc: Cancel", style="dim")
+        console.print(controls)
+
+    try:
+        # Set terminal to raw mode
+        tty.setraw(fd)
+
+        # Hide cursor
+        sys.stdout.write('\033[?25l')
+        sys.stdout.flush()
+
+        # Initial render
+        render_config_screen()
+
+        while True:
+            # Read a single character
+            char = sys.stdin.read(1)
+
+            # Handle escape sequences (arrow keys)
+            if char == '\x1b':  # ESC
+                next_char = sys.stdin.read(1)
+                if next_char == '[':
+                    arrow = sys.stdin.read(1)
+                    if arrow == 'A':  # Up arrow
+                        current_option = max(0, current_option - 1)
+                    elif arrow == 'B':  # Down arrow
+                        current_option = min(len(option_keys) - 1, current_option + 1)
+                else:
+                    # Escape key pressed (without arrow)
+                    return None
+
+            # Handle other keys
+            elif char == ' ':  # Spacebar - toggle current option
+                option_key = option_keys[current_option]
+                options[option_key] = not options[option_key]
+
+            elif char == '\r' or char == '\n':  # Enter - confirm
+                # Build result dictionary
+                result = {
+                    'resize': options['resize'],
+                    'target_size_kb': config.get('target_size_kb', 400),
+                    'preserve_exif': options['preserve_exif'],
+                }
+                return result
+
+            elif char == 'b' or char == 'B':  # Go back
+                return None
+
+            elif char == 'q' or char == 'Q':  # Quit
+                return None
+
+            elif char == '\x03':  # Ctrl+C
+                raise KeyboardInterrupt
+
+            # Redraw screen
+            render_config_screen()
+
+    finally:
+        # Restore terminal settings
+        sys.stdout.write('\033[?25h')  # Show cursor
+        sys.stdout.flush()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 def select_images(images: List[Path]) -> List[Path]:
     """Interactive image selection with TUI.
 
