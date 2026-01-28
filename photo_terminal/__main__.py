@@ -19,7 +19,7 @@ from pathlib import Path
 
 from photo_terminal.config import load_config
 from photo_terminal.scanner import scan_folder
-from photo_terminal.tui import select_images
+from photo_terminal.tui import select_images, show_processing_config
 from photo_terminal.s3_browser import browse_s3_folders
 from photo_terminal.confirmation import confirm_upload
 from photo_terminal.dry_run import dry_run_upload
@@ -186,6 +186,28 @@ Configuration:
         print(f"  - {img.name}")
     print()
 
+    # Stage 2: Configure processing options
+    try:
+        processing_config = show_processing_config(selected_images, cfg.__dict__)
+        if processing_config is None:
+            # User cancelled or went back
+            print("\nProcessing configuration cancelled")
+            return 1
+    except KeyboardInterrupt:
+        print("\nCancelled by user")
+        return 1
+    except SystemExit:
+        return 1
+
+    # Display processing configuration
+    print()
+    print("Processing configuration:")
+    print(f"  Resize images:     {'Yes' if processing_config['resize'] else 'No'}")
+    if processing_config['resize']:
+        print(f"  Target size:       {processing_config['target_size_kb']} KB")
+    print(f"  Preserve EXIF:     {'Yes' if processing_config['preserve_exif'] else 'No'}")
+    print()
+
     # S3 folder browser (Task #5)
     # Skip browser if --prefix was provided via CLI
     try:
@@ -215,11 +237,12 @@ Configuration:
     if args.dry_run:
         # Run dry-run mode (shows sizes, exits without uploading)
         try:
+            target_size = processing_config['target_size_kb'] if processing_config['resize'] else cfg.target_size_kb
             dry_run_upload(
                 selected_images,
                 cfg.bucket,
                 selected_prefix,
-                cfg.target_size_kb,
+                target_size,
                 cfg.aws_profile
             )
         except SystemExit as e:
@@ -250,9 +273,11 @@ Configuration:
     print("Processing images...")
     print()
     try:
+        # Use target size from processing config if resize is enabled
+        target_size = processing_config['target_size_kb'] if processing_config['resize'] else None
         temp_dir, processed_images = process_images(
             selected_images,
-            cfg.target_size_kb
+            target_size if target_size else cfg.target_size_kb
         )
     except InsufficientDiskSpaceError as e:
         print(f"Error: {e}")

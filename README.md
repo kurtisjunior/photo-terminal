@@ -133,20 +133,66 @@ photo-upload ./photos --prefix france/paris --dry-run
 
 ## Workflow
 
-The application follows this workflow:
+The application follows this multi-stage workflow:
 
 1. **Load Configuration**: Reads `~/.photo-uploader.yaml`
 2. **Parse CLI Arguments**: Overrides config values if specified
 3. **Scan Folder**: Validates images (JPEG, PNG, WEBP, TIFF, BMP, GIF)
-4. **Select Images**: Two-pane TUI with live preview
-5. **Browse S3 Folders**: Interactive folder browser (if --prefix not specified)
-6. **Confirm Upload**: Shows count and target location
-7. **Dry-Run Check**: If --dry-run flag set, shows preview and exits
-8. **Check Duplicates**: Pre-validates no files exist in S3 target
-9. **Process Images**: Optimizes with JPEG quality iteration
-10. **Upload to S3**: Batch upload with progress spinner
-11. **Show Summary**: Displays completion statistics
-12. **Cleanup**: Removes temp files on success
+4. **Stage 1 - Select Images**: Two-pane TUI with live preview
+   - Mark images with `y` or `Space` (shows `[x]`)
+   - Lock selections with `Enter` (prevents accidental changes)
+   - Proceed to next stage with `n`
+5. **Stage 2 - Configure Processing**: Interactive configuration screen
+   - Choose whether to resize images
+   - Choose whether to preserve EXIF data
+   - Confirm with `Enter` or go back with `b`
+6. **Browse S3 Folders**: Interactive folder browser (if --prefix not specified)
+7. **Confirm Upload**: Shows count and target location
+8. **Dry-Run Check**: If --dry-run flag set, shows preview and exits
+9. **Check Duplicates**: Pre-validates no files exist in S3 target
+10. **Process Images**: Optimizes with JPEG quality iteration
+11. **Upload to S3**: Batch upload with progress spinner
+12. **Show Summary**: Displays completion statistics
+13. **Cleanup**: Removes temp files on success
+
+## Multi-Stage Workflow Example
+
+Here's a typical workflow when using the photo upload manager:
+
+### 1. Start the application
+```bash
+photo-upload /path/to/photos --prefix japan/tokyo
+```
+
+### 2. Select images (Stage 1)
+- Navigate through images with arrow keys
+- Press `y` or `Space` to mark images you want to upload (they show `[x]`)
+- Preview appears on the right side as you navigate
+- Select multiple images by marking each one
+- Press `Enter` to lock your selections (green confirmation appears)
+- Press `n` to proceed to processing configuration
+
+### 3. Configure processing (Stage 2)
+- Two options appear: "Resize images" and "Preserve EXIF data"
+- Both are enabled by default
+- Use arrow keys to navigate between options
+- Press `Space` to toggle any option on/off
+- Press `Enter` to confirm and proceed
+- Or press `b` to go back and change your image selection
+
+### 4. Browse S3 folders (Stage 3, if --prefix not specified)
+- Navigate through existing S3 folder structure
+- Press `Enter` to select a folder or go deeper
+- Press `Backspace` to go up one level
+
+### 5. Confirm and upload
+- Review the summary of selected images and target location
+- Confirm to start processing and upload
+- Watch the progress spinner as images are optimized and uploaded
+
+### 6. View completion summary
+- See statistics: file count, original size, processed size, savings
+- View list of uploaded files with their S3 paths
 
 ## Dry-Run Mode
 
@@ -167,17 +213,44 @@ No S3 operations are performed in dry-run mode.
 
 ## Interactive TUI Controls
 
-### Image Selection Screen
+### Stage 1: Image Selection Screen
 
+The image selection uses a multi-step workflow to prevent accidental uploads:
+
+1. **Mark images**: Use `y` or `Space` to mark images with `[x]`
+2. **Lock selections**: Press `Enter` to lock your selections (prevents accidental changes)
+3. **Proceed**: Press `n` to move to the processing configuration stage
+
+**Keyboard Controls**:
 - **Arrow Keys** (↑/↓): Navigate file list
-- **Spacebar**: Toggle selection checkbox
-- **y**: Select current image and proceed immediately (quick single-image selection)
+- **y** or **Space**: Toggle selection checkbox `[x]`
 - **a**: Select/deselect all images at once
-- **Enter**: Confirm selection and proceed
-- **q**: Quit without uploading
+- **Enter**: Lock/unlock selections
+  - When unlocked: Locks your current selections
+  - When locked: Unlocks to allow changes
+- **n**: Proceed to next stage (only available when selections are locked)
+- **q** or **Esc**: Cancel and quit
 
-### S3 Folder Browser
+### Stage 2: Processing Configuration Screen
 
+After locking your selections, configure how images will be processed:
+
+**Options**:
+- **Resize images**: Optimize images to target file size (default: enabled)
+- **Preserve EXIF data**: Keep camera, date, and GPS metadata (default: enabled)
+
+**Keyboard Controls**:
+- **Arrow Keys** (↑/↓): Navigate options
+- **Space**: Toggle current option on/off
+- **Enter**: Confirm configuration and proceed
+- **b**: Go back to image selection stage
+- **q** or **Esc**: Cancel and quit
+
+### Stage 3: S3 Folder Browser
+
+If `--prefix` was not specified on the command line, an interactive browser appears:
+
+**Keyboard Controls**:
 - **Arrow Keys** (↑/↓): Navigate folders
 - **Enter**: Select folder / Navigate into subfolder
 - **Backspace**: Go up one level

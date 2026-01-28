@@ -788,3 +788,298 @@ class TestTerminalCapabilities:
         }, clear=True):
             # Multiplexers break graphics protocols
             assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+
+
+class TestMultiStageWorkflow:
+    """Tests for the complete multi-stage workflow (mark → lock → proceed)."""
+
+    def test_full_workflow_success(self, sample_images):
+        """Test complete workflow: mark → lock → proceed → success."""
+        selector = ImageSelector(sample_images)
+
+        # Mark first two images, then lock, then proceed
+        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', ' ', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return 2 selected images
+        assert result is not None
+        assert len(result) == 2
+        assert sample_images[0] in result
+        assert sample_images[1] in result
+        assert selector._selections_locked is True
+
+    def test_lock_without_selection(self, sample_images):
+        """Test trying to lock with no images selected (should do nothing)."""
+        selector = ImageSelector(sample_images)
+
+        # Try to lock without selecting anything, then quit
+        with patch('sys.stdin.read', side_effect=['\r', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (quit), lock should not have happened
+        assert result is None
+        assert selector._selections_locked is False
+        assert len(selector.selected_indices) == 0
+
+    def test_proceed_without_lock(self, sample_images):
+        """Test trying 'n' without locking (should be ignored)."""
+        selector = ImageSelector(sample_images)
+
+        # Mark an image, try 'n' without locking, then quit
+        with patch('sys.stdin.read', side_effect=['y', 'n', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (quit), not proceed
+        assert result is None
+        assert selector._selections_locked is False
+
+    def test_lock_unlock_cycle(self, sample_images):
+        """Test lock, then unlock, then lock again."""
+        selector = ImageSelector(sample_images)
+
+        # Mark image, lock, unlock, lock again, proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return selected image, and be locked at end
+        assert result is not None
+        assert len(result) == 1
+        assert selector._selections_locked is True
+
+    def test_mark_after_lock(self, sample_images):
+        """Test that marking works even after locking (lock doesn't prevent changes)."""
+        selector = ImageSelector(sample_images)
+
+        # Mark first image, lock, mark second image, proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\x1b', '[', 'B', 'y', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should have both images selected (lock doesn't prevent changes in current implementation)
+        assert result is not None
+        assert len(result) == 2
+
+    def test_unlock_allows_changes(self, sample_images):
+        """Test that after unlocking, can mark/unmark images again."""
+        selector = ImageSelector(sample_images)
+
+        # Mark image, lock, unlock, unmark image, mark different image, lock, proceed
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', 'y', '\x1b', '[', 'B', 'y', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should have only second image (first was toggled off)
+        assert result is not None
+        assert len(result) == 1
+        assert sample_images[1] in result
+
+    def test_cancel_during_selection(self, sample_images):
+        """Test pressing 'q' during marking stage."""
+        selector = ImageSelector(sample_images)
+
+        # Mark some images, then quit before locking
+        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', 'y', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (cancelled)
+        assert result is None
+        assert selector._selections_locked is False
+
+    def test_cancel_during_locked(self, sample_images):
+        """Test pressing 'q' after locking."""
+        selector = ImageSelector(sample_images)
+
+        # Mark images, lock, then quit
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (cancelled)
+        assert result is None
+        assert selector._selections_locked is True  # Lock state persists
+
+    def test_n_key_only_after_lock(self, sample_images):
+        """Test that 'n' key requires lock first."""
+        selector = ImageSelector(sample_images)
+
+        # Verify 'n' is ignored without lock
+        with patch('sys.stdin.read', side_effect=['y', 'n', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should successfully return (first 'n' ignored, lock happened, second 'n' proceeded)
+        assert result is not None
+        assert len(result) == 1
+
+    def test_escape_key_cancels(self, sample_images):
+        """Test that Escape key cancels selection."""
+        selector = ImageSelector(sample_images)
+
+        # Mark images, then press Escape (without arrow key following)
+        with patch('sys.stdin.read', side_effect=['y', '\x1b', 'x']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return None (cancelled by Escape)
+        assert result is None
+
+    def test_lock_state_preserved_across_navigation(self, sample_images):
+        """Test that lock state is preserved when navigating."""
+        selector = ImageSelector(sample_images)
+
+        # Mark, lock, navigate, verify lock persists
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\x1b', '[', 'B', '\x1b', '[', 'A', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return selected images, lock should be active
+        assert result is not None
+        assert selector._selections_locked is True
+
+    def test_uppercase_n_works(self, sample_images):
+        """Test that uppercase 'N' works for proceeding."""
+        selector = ImageSelector(sample_images)
+
+        # Mark, lock, proceed with uppercase N
+        with patch('sys.stdin.read', side_effect=['y', '\r', 'N']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should successfully return
+        assert result is not None
+        assert len(result) == 1
+
+    def test_multiple_selections_before_lock(self, sample_images):
+        """Test marking multiple images before locking."""
+        selector = ImageSelector(sample_images)
+
+        # Mark all three images, then lock, then proceed
+        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Should return all images
+        assert result is not None
+        assert len(result) == 3
+        assert set(result) == set(sample_images)
+
+    def test_locked_indices_stored(self, sample_images):
+        """Test that locked indices are stored correctly."""
+        selector = ImageSelector(sample_images)
+
+        # Mark first and third images, lock
+        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', '\x1b', '[', 'B', 'y', '\r', 'n']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify locked indices match selected indices
+        assert selector._locked_indices == {0, 2}
+        assert len(result) == 2
+
+    def test_unlock_clears_locked_indices(self, sample_images):
+        """Test that unlocking clears locked indices."""
+        selector = ImageSelector(sample_images)
+
+        # Mark, lock, unlock, quit
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', 'q']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    result = selector.run()
+
+        # Verify unlocked state
+        assert selector._selections_locked is False
+        assert len(selector._locked_indices) == 0
+
+    def test_ctrl_c_during_locked_stage(self, sample_images):
+        """Test Ctrl+C during locked stage raises KeyboardInterrupt."""
+        selector = ImageSelector(sample_images)
+
+        # Mark, lock, then Ctrl+C
+        with patch('sys.stdin.read', side_effect=['y', '\r', '\x03']):
+            with patch.object(selector, 'render_with_preview'):
+                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
+                    with patch('sys.stdin.fileno', return_value=0):
+                        with patch('termios.tcgetattr', return_value=[]):
+                            with patch('termios.tcsetattr'):
+                                with patch('tty.setraw'):
+                                    with pytest.raises(KeyboardInterrupt):
+                                        selector.run()
