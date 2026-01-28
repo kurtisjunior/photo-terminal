@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -197,6 +198,85 @@ class ImageSelector:
         self.current_index = 0  # Currently highlighted image
         self.console = Console(color_system="truecolor", force_terminal=True)
         self._first_render = True  # Track first render for graphics protocol mode
+        self._image_cache = {}  # Cache for rendered image output: {image_path: output}
+
+    def _preload_image(self, index: int) -> None:
+        """Pre-load image at index into cache in background.
+
+        Args:
+            index: Index of image to pre-load
+        """
+        if index < 0 or index >= len(self.images):
+            return  # Out of bounds
+
+        image_path = self.images[index]
+        protocol = TerminalCapabilities.detect_graphics_protocol()
+
+        # Calculate dimensions (same as render methods)
+        terminal_size = os.get_terminal_size()
+
+        if protocol in ('iterm', 'kitty', 'ghostty', 'sixel'):
+            # Graphics protocol dimensions
+            terminal_width = terminal_size.columns
+            terminal_height = terminal_size.lines
+            image_column = 60
+            image_width = terminal_width - image_column - 2
+            image_height = terminal_height - 2
+
+            cache_key = f"graphics:{image_path}:{image_width}:{image_height}"
+            if cache_key not in self._image_cache:
+                try:
+                    result = subprocess.run(
+                        ["viu", "-w", str(image_width), "-h", str(image_height), str(image_path)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        self._image_cache[cache_key] = result.stdout
+                        logger.debug(f"Pre-loaded graphics output for {image_path.name}")
+                except Exception as e:
+                    logger.error(f"Pre-load failed for {image_path.name}: {e}")
+        else:
+            # Block mode dimensions
+            file_list_width = 55
+            image_column = file_list_width + 5
+            image_width = max(20, min(terminal_size.columns - image_column - 2, 60))
+            image_height = max(10, min(terminal_size.lines - 5, 35))
+
+            cache_key = f"blocks:{image_path}:{image_width}:{image_height}"
+            if cache_key not in self._image_cache:
+                try:
+                    result = subprocess.run(
+                        ["viu", "-b", "-w", str(image_width), "-h", str(image_height), str(image_path)],
+                        capture_output=True,
+                        text=False,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        viu_lines = result.stdout.decode('utf-8', errors='replace').splitlines()
+                        self._image_cache[cache_key] = viu_lines
+                        logger.debug(f"Pre-loaded blocks output for {image_path.name}")
+                except Exception as e:
+                    logger.error(f"Pre-load failed for {image_path.name}: {e}")
+
+    def _trigger_preload(self) -> None:
+        """Pre-load adjacent images in background."""
+        # Pre-load next image (N+1)
+        if self.current_index + 1 < len(self.images):
+            threading.Thread(
+                target=self._preload_image,
+                args=(self.current_index + 1,),
+                daemon=True
+            ).start()
+
+        # Pre-load previous image (N-1)
+        if self.current_index - 1 >= 0:
+            threading.Thread(
+                target=self._preload_image,
+                args=(self.current_index - 1,),
+                daemon=True
+            ).start()
 
     def toggle_selection(self) -> None:
         """Toggle selection state of current image."""
@@ -324,8 +404,15 @@ class ImageSelector:
         image_height = max(10, min(terminal_size.lines - 5, 35))
 
         # Get the image lines with blocks (viu 1.6.1 only supports blocks)
+        # Use cache to eliminate navigation delay
+        cache_key = f"blocks:{current_image}:{image_width}:{image_height}"
         viu_lines = []
-        if check_viu_availability():
+
+        if cache_key in self._image_cache:
+            # Use cached output - instant!
+            viu_lines = self._image_cache[cache_key]
+            logger.debug(f"Using cached blocks output for {current_image.name}")
+        elif check_viu_availability():
             try:
                 # Use blocks - this viu version (1.6.1) doesn't support graphics protocols
                 # Blocks are low-res by nature, but larger size helps
@@ -338,6 +425,9 @@ class ImageSelector:
 
                 if result.returncode == 0:
                     viu_lines = result.stdout.decode('utf-8', errors='replace').splitlines()
+                    # Cache the splitlines() output for instant replay
+                    self._image_cache[cache_key] = viu_lines
+                    logger.debug(f"Cached blocks output for {current_image.name} ({len(viu_lines)} lines)")
             except Exception as e:
                 logger.error(f"viu preview failed: {e}")
                 viu_lines = [f"[Preview error: {e}]"]
@@ -363,6 +453,9 @@ class ImageSelector:
                 sys.stdout.write(viu_lines[row])
 
         sys.stdout.flush()
+
+        # Pre-load adjacent images for faster navigation
+        self._trigger_preload()
 
     def render_with_graphics_protocol(self):
         """Render TUI using graphics protocol for HD images.
@@ -413,32 +506,52 @@ class ImageSelector:
 
         sys.stdout.flush()
 
+        # Render new image with caching for instant navigation
+        current_image = self.images[self.current_index]
+
+        # Cache key includes dimensions to handle terminal resizes
+        cache_key = f"graphics:{current_image}:{image_width}:{image_height}"
+
         # Position cursor at top-right where image should render
         sys.stdout.write(f'\033[1;{image_column}H')
         sys.stdout.flush()
 
-        # Render new image
-        current_image = self.images[self.current_index]
-
-        # CRITICAL: Stream to stdout directly, no capture
-        # This preserves the binary graphics protocol escape sequences
-        try:
-            result = subprocess.run(
-                ["viu", "-w", str(image_width), "-h", str(image_height), str(current_image)],
-                stdout=sys.stdout,  # Direct stream
-                stderr=subprocess.PIPE,
-                timeout=5
-            )
-            if result.returncode != 0 and result.stderr:
-                error_msg = result.stderr.decode('utf-8', errors='replace').strip()
-                sys.stdout.write(f"\n[Preview error: {error_msg}]\n")
+        if cache_key in self._image_cache:
+            # Use cached output - INSTANT!
+            cached_output = self._image_cache[cache_key]
+            sys.stdout.buffer.write(cached_output)
+            sys.stdout.flush()
+            logger.debug(f"Using cached graphics output for {current_image.name}")
+        else:
+            # Call viu and cache result
+            # CRITICAL: Capture output to cache, then write it
+            # This preserves the binary graphics protocol escape sequences
+            try:
+                result = subprocess.run(
+                    ["viu", "-w", str(image_width), "-h", str(image_height), str(current_image)],
+                    stdout=subprocess.PIPE,  # Capture for caching
+                    stderr=subprocess.PIPE,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    # Cache and display the output
+                    self._image_cache[cache_key] = result.stdout
+                    sys.stdout.buffer.write(result.stdout)
+                    sys.stdout.flush()
+                    logger.debug(f"Cached graphics output for {current_image.name} ({len(result.stdout)} bytes)")
+                else:
+                    error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+                    sys.stdout.write(f"\n[Preview error: {error_msg}]\n")
+                    sys.stdout.flush()
+            except subprocess.TimeoutExpired:
+                sys.stdout.write("[Preview timed out]")
                 sys.stdout.flush()
-        except subprocess.TimeoutExpired:
-            sys.stdout.write("[Preview timed out]")
-        except Exception as e:
-            sys.stdout.write(f"[Preview error: {e}]")
+            except Exception as e:
+                sys.stdout.write(f"[Preview error: {e}]")
+                sys.stdout.flush()
 
-        sys.stdout.flush()
+        # Pre-load adjacent images for faster navigation
+        self._trigger_preload()
 
     def render_with_preview(self, full_render: bool = True):
         """Render the TUI with appropriate method based on terminal capabilities.
