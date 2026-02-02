@@ -728,10 +728,14 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
 
     console = Console()
 
+    # Available output formats
+    AVAILABLE_FORMATS = ['JPEG', 'PNG', 'WEBP']
+
     # Configuration options with defaults
     options = {
         'resize': True,  # Apply size optimization
         'preserve_exif': True,  # Preserve EXIF data
+        'output_format': 'JPEG',  # Output format (cycles through AVAILABLE_FORMATS)
     }
 
     current_option = 0  # Currently highlighted option
@@ -793,6 +797,29 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
                 checkbox
             )
 
+        # Output format option
+        format_value = options['output_format']
+        format_desc = {
+            'JPEG': 'Lossy compression, smallest size',
+            'PNG': 'Lossless, larger size',
+            'WEBP': 'Modern, balanced size/quality'
+        }.get(format_value, '')
+
+        if current_option == 2:
+            table.add_row(
+                Text("►", style="bold cyan"),
+                Text("Output format", style="bold cyan"),
+                Text(format_desc, style="cyan"),
+                Text(format_value, style="bold cyan")
+            )
+        else:
+            table.add_row(
+                "",
+                "Output format",
+                format_desc,
+                format_value
+            )
+
         # Display table in panel
         console.print(Panel(table, title="Processing Options", border_style="blue"))
         console.print()
@@ -800,7 +827,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         # Controls
         controls = Text()
         controls.append("↑/↓: Navigate  ", style="dim")
-        controls.append("Space: Toggle  ", style="dim")
+        controls.append("Space: Toggle/Cycle  ", style="dim")
         controls.append("Enter: Confirm  ", style="dim")
         controls.append("b: Go Back  ", style="dim")
         controls.append("q/Esc: Cancel", style="dim")
@@ -835,9 +862,17 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
                     return None
 
             # Handle other keys
-            elif char == ' ':  # Spacebar - toggle current option
+            elif char == ' ':  # Spacebar - toggle/cycle current option
                 option_key = option_keys[current_option]
-                options[option_key] = not options[option_key]
+                if option_key == 'output_format':
+                    # Cycle through available formats
+                    current_format = options['output_format']
+                    current_index = AVAILABLE_FORMATS.index(current_format)
+                    next_index = (current_index + 1) % len(AVAILABLE_FORMATS)
+                    options['output_format'] = AVAILABLE_FORMATS[next_index]
+                else:
+                    # Toggle boolean option
+                    options[option_key] = not options[option_key]
 
             elif char == '\r' or char == '\n':  # Enter - confirm
                 # Build result dictionary
@@ -845,6 +880,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
                     'resize': options['resize'],
                     'target_size_kb': config.get('target_size_kb', 400),
                     'preserve_exif': options['preserve_exif'],
+                    'output_format': options['output_format'],
                 }
                 return result
 

@@ -19,7 +19,8 @@ def dry_run_upload(
     bucket: str,
     prefix: str,
     target_size_kb: int,
-    aws_profile: str
+    aws_profile: str,
+    output_format: str = 'JPEG'
 ) -> None:
     """Show what would be uploaded without actually uploading.
 
@@ -33,19 +34,20 @@ def dry_run_upload(
         prefix: S3 prefix/folder path (may be empty string for root)
         target_size_kb: Target file size in kilobytes
         aws_profile: AWS CLI profile name (not used in dry-run)
+        output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
 
     Raises:
         SystemExit: Always exits after displaying dry-run report
     """
     # Display dry-run header
-    _print_header(bucket, prefix, target_size_kb)
+    _print_header(bucket, prefix, target_size_kb, output_format)
 
     # Process images to get accurate size information
     print("Processing images to calculate sizes...")
     print()
 
     try:
-        temp_dir, processed_images = process_images(images, target_size_kb)
+        temp_dir, processed_images = process_images(images, target_size_kb, output_format)
     except Exception as e:
         print(f"Error during image processing: {e}")
         raise SystemExit(1)
@@ -72,13 +74,14 @@ def dry_run_upload(
     raise SystemExit(0)
 
 
-def _print_header(bucket: str, prefix: str, target_size_kb: int) -> None:
+def _print_header(bucket: str, prefix: str, target_size_kb: int, output_format: str = 'JPEG') -> None:
     """Print dry-run mode header.
 
     Args:
         bucket: S3 bucket name
         prefix: S3 prefix/folder path
         target_size_kb: Target file size in kilobytes
+        output_format: Output format
     """
     print()
     print("DRY RUN MODE - No files will be uploaded")
@@ -93,6 +96,7 @@ def _print_header(bucket: str, prefix: str, target_size_kb: int) -> None:
 
     print(f"Target location: {s3_target}")
     print(f"Target size:     {target_size_kb} KB")
+    print(f"Output format:   {output_format}")
     print()
 
 

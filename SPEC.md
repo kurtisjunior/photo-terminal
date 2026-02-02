@@ -12,15 +12,19 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ### Included Features
 
-- Two-pane TUI with file list (left) and viu preview (right) for image selection
+- Multi-stage workflow with selection locking (Stage 1: select, Stage 2: configure, Stage 3: browse)
+- Two-pane TUI with file list and viu preview for image selection
+- Processing configuration screen (resize, EXIF preservation, output format)
+- Output format selection (JPEG, PNG, WEBP) with format-specific optimization
 - Interactive S3 folder browser with hierarchy navigation (existing bucket structure)
-- Batch JPEG conversion with size-based optimization (~400kb target, configurable)
+- Batch image conversion with size-based optimization (~400kb target, configurable)
 - Basic EXIF preservation (camera, date taken, GPS) using Pillow
 - Temp file processing with automatic cleanup
 - YAML configuration with CLI argument overrides
 - Minimal progress feedback (spinner + count) with fail-fast error handling
-- Dry-run mode showing file list and size changes
+- Dry-run mode showing file list, size changes, and output format
 - Format validation and duplicate detection
+- Debug mode with environment variable control
 
 ### Explicitly Excluded
 
@@ -131,7 +135,9 @@ Standard web formats only (JPEG, PNG, WEBP, TIFF, BMP, GIF). No RAW support.
 Use AWS CLI configuration with profile 'kurtis-site'. Region from CLI config.
 
 ### Resize Strategy
-Size-based optimization targeting ~400kb (configurable). Pillow quality iteration rather than dimension-based resizing.
+Size-based optimization targeting ~400kb (configurable). Format-specific strategies:
+- JPEG/WEBP: Pillow quality iteration (95→60)
+- PNG: Maximum compression (lossless, cannot reach target size)
 
 ### S3 Organization
 Interactive folder browser for existing bucket structure. Navigate hierarchy (japan/, italy/trapani/). No automatic folder creation or date-based organization.
@@ -149,7 +155,11 @@ Minimal - spinner with count during upload, completion summary with filenames. N
 None - tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
 
 ### Selection UI
-Two-pane TUI with checkbox-style indicators. Manual selection only, no batch shortcuts. Arrow keys navigate, spacebar toggles, enter confirms.
+Two-pane TUI with checkbox-style indicators and multi-stage workflow:
+1. Mark images with y/Space (shows [x])
+2. Lock selections with Enter (prevents accidental changes)
+3. Proceed with 'n' to processing configuration
+Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, enter locks, 'n' proceeds.
 
 ### Error Handling
 Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, pre-validation before processing starts.
@@ -164,4 +174,14 @@ YAML file (~/.photo-uploader.yaml) auto-created with defaults. CLI args override
 Python tempfile.TemporaryDirectory for processed images. Automatic cleanup on success. Persistence on failure enables retry without reprocessing.
 
 ### Dependencies
-viu is hard requirement (no fallback mode). Pillow for processing, boto3 for S3, rich/textual for TUI.
+viu is hard requirement (no fallback mode). Pillow for processing, boto3 for S3, rich for TUI, PyYAML for config.
+
+### Output Formats
+User selects output format in Stage 2 (Processing Configuration):
+- JPEG: Lossy compression, smallest size, quality-based optimization
+- PNG: Lossless compression, transparency support, max compression level
+- WEBP: Modern format, lossy compression, balanced size/quality
+
+### Environment Variables
+- PHOTO_TERMINAL_DEBUG: Enable debug logging to /tmp/photo_terminal_debug.log
+- PHOTO_TERMINAL_ESC_TIMEOUT: ESC key detection timeout in seconds (default: 0.10)

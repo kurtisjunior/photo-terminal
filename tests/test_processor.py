@@ -51,7 +51,7 @@ def mock_optimize_result():
 
 def test_process_images_success(sample_images, mock_optimize_result):
     """Test successful processing of multiple images."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         # Create a dummy file to simulate optimizer output
         output_path.touch()
         return mock_optimize_result
@@ -97,7 +97,7 @@ def test_process_images_with_warnings(sample_images):
         'warnings': ['target_size_not_reached: Could not reach target size']
     }
 
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_result
 
@@ -115,7 +115,7 @@ def test_process_images_with_warnings(sample_images):
 
 def test_process_images_preserves_original_filenames(sample_images, mock_optimize_result):
     """Test that original filenames are preserved in temp directory."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 
@@ -153,7 +153,7 @@ def test_process_images_optimizer_failure(sample_images):
 
 def test_process_images_progress_feedback(sample_images, mock_optimize_result, capsys):
     """Test that progress feedback is displayed."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 
@@ -198,7 +198,7 @@ def test_process_images_temp_directory_persistence_on_failure(sample_images):
 
 def test_process_images_custom_target_size(sample_images, mock_optimize_result):
     """Test processing with custom target size."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 
@@ -217,7 +217,7 @@ def test_process_images_custom_target_size(sample_images, mock_optimize_result):
 
 def test_process_images_calls_optimizer_with_correct_paths(sample_images, mock_optimize_result):
     """Test that optimizer is called with correct input and output paths."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 
@@ -381,7 +381,7 @@ def test_processed_image_dataclass():
 
 def test_process_images_clears_progress_line(sample_images, mock_optimize_result, capsys):
     """Test that progress line is cleared after processing."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 
@@ -401,7 +401,7 @@ def test_process_images_clears_progress_line(sample_images, mock_optimize_result
 
 def test_process_images_temp_directory_prefix(sample_images, mock_optimize_result):
     """Test that temp directory has correct prefix."""
-    def mock_optimize_side_effect(input_path, output_path, target_size_kb):
+    def mock_optimize_side_effect(input_path, output_path, target_size_kb, output_format='JPEG'):
         output_path.touch()
         return mock_optimize_result
 

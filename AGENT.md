@@ -21,16 +21,20 @@ A terminal-based image upload manager with two-pane TUI interface for interactiv
 - Fail-fast error handling throughout
 
 ### Supported Formats
-JPEG, PNG, WEBP, TIFF, BMP, GIF (no RAW support)
+**Input**: JPEG, PNG, WEBP, TIFF, BMP, GIF (no RAW support)
+**Output**: JPEG, PNG, WEBP (user-selectable in Stage 2)
 
 ### Key Features
-1. Interactive file selection with live preview
-2. S3 folder browser with hierarchy navigation
-3. Size-based JPEG optimization (~400kb target)
-4. Basic EXIF preservation (camera, date, GPS)
-5. Duplicate detection before upload
-6. Dry-run mode with size comparison
-7. YAML config with CLI overrides
+1. Multi-stage workflow with selection locking
+2. Interactive file selection with live preview
+3. Processing configuration (resize, EXIF, output format)
+4. Output format selection (JPEG, PNG, WEBP)
+5. S3 folder browser with hierarchy navigation
+6. Size-based image optimization (~400kb target)
+7. Basic EXIF preservation (camera, date, GPS)
+8. Duplicate detection before upload
+9. Dry-run mode with size comparison
+10. YAML config with CLI overrides
 
 ## Implementation Priorities
 
@@ -85,11 +89,15 @@ Follow the 12-step implementation order in SPEC.md:
 
 ### UX Validation
 - [ ] Arrow keys navigate file list
-- [ ] Spacebar toggles selection
-- [ ] Enter confirms and proceeds
+- [ ] Spacebar/y toggles selection
+- [ ] 'a' key selects/deselects all
+- [ ] Enter locks/unlocks selections
+- [ ] 'n' proceeds to next stage when locked
 - [ ] viu preview updates on navigation
+- [ ] Processing config shows all options (resize, EXIF, format)
+- [ ] Spacebar cycles through output formats
 - [ ] S3 folder browser shows hierarchy
-- [ ] Dry-run shows size comparison
+- [ ] Dry-run shows size comparison with output format
 
 ### Error Scenarios
 - [ ] viu not installed → clear error + install instructions
@@ -134,6 +142,13 @@ When problems are found:
 ## Key Files to Understand
 
 - `SPEC.md` - Complete project specification
+- `README.md` - User documentation and usage guide
 - Config location: `~/.photo-uploader.yaml`
 - Temp directory: `tempfile.TemporaryDirectory`
 - S3 bucket structure: `japan/`, `italy/trapani/`, etc.
+- Debug log: `/tmp/photo_terminal_debug.log` (when PHOTO_TERMINAL_DEBUG=1)
+
+## Environment Variables
+
+- `PHOTO_TERMINAL_DEBUG`: Enable debug logging (logs to /tmp/photo_terminal_debug.log)
+- `PHOTO_TERMINAL_ESC_TIMEOUT`: ESC key timeout in seconds (default: 0.10)

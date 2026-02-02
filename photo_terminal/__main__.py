@@ -206,6 +206,7 @@ Configuration:
     if processing_config['resize']:
         print(f"  Target size:       {processing_config['target_size_kb']} KB")
     print(f"  Preserve EXIF:     {'Yes' if processing_config['preserve_exif'] else 'No'}")
+    print(f"  Output format:     {processing_config['output_format']}")
     print()
 
     # S3 folder browser (Task #5)
@@ -243,7 +244,8 @@ Configuration:
                 cfg.bucket,
                 selected_prefix,
                 target_size,
-                cfg.aws_profile
+                cfg.aws_profile,
+                processing_config['output_format']
             )
         except SystemExit as e:
             # dry_run_upload always exits - return its exit code
@@ -277,7 +279,8 @@ Configuration:
         target_size = processing_config['target_size_kb'] if processing_config['resize'] else None
         temp_dir, processed_images = process_images(
             selected_images,
-            target_size if target_size else cfg.target_size_kb
+            target_size if target_size else cfg.target_size_kb,
+            processing_config['output_format']
         )
     except InsufficientDiskSpaceError as e:
         print(f"Error: {e}")

@@ -146,7 +146,7 @@ def test_dry_run_upload_calls_processor(sample_images, sample_processed_images, 
             )
 
         # Verify process_images called with correct arguments
-        mock_process.assert_called_once_with(sample_images, 500)
+        mock_process.assert_called_once_with(sample_images, 500, 'JPEG')
 
 
 def test_dry_run_upload_cleans_up_temp_files(sample_images, sample_processed_images, mock_temp_dir):

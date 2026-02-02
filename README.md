@@ -173,10 +173,11 @@ photo-upload /path/to/photos --prefix japan/tokyo
 - Press `n` to proceed to processing configuration
 
 ### 3. Configure processing (Stage 2)
-- Two options appear: "Resize images" and "Preserve EXIF data"
-- Both are enabled by default
+- Three options appear: "Resize images", "Preserve EXIF data", and "Output format"
+- Resize and EXIF preservation are enabled by default
+- Output format defaults to JPEG
 - Use arrow keys to navigate between options
-- Press `Space` to toggle any option on/off
+- Press `Space` to toggle options on/off, or cycle through output formats (JPEG → PNG → WEBP)
 - Press `Enter` to confirm and proceed
 - Or press `b` to go back and change your image selection
 
@@ -238,10 +239,14 @@ After locking your selections, configure how images will be processed:
 **Options**:
 - **Resize images**: Optimize images to target file size (default: enabled)
 - **Preserve EXIF data**: Keep camera, date, and GPS metadata (default: enabled)
+- **Output format**: Choose output file format - JPEG, PNG, or WEBP (default: JPEG)
+  - **JPEG**: Lossy compression, smallest size
+  - **PNG**: Lossless, larger size, supports transparency
+  - **WEBP**: Modern format, balanced size/quality
 
 **Keyboard Controls**:
 - **Arrow Keys** (↑/↓): Navigate options
-- **Space**: Toggle current option on/off
+- **Space**: Toggle option on/off, or cycle through output formats
 - **Enter**: Confirm configuration and proceed
 - **b**: Go back to image selection stage
 - **q** or **Esc**: Cancel and quit
@@ -258,6 +263,7 @@ If `--prefix` was not specified on the command line, an interactive browser appe
 
 ## Supported Image Formats
 
+### Input Formats (what you can upload)
 - JPEG (.jpg, .jpeg)
 - PNG (.png)
 - WEBP (.webp)
@@ -266,6 +272,31 @@ If `--prefix` was not specified on the command line, an interactive browser appe
 - GIF (.gif)
 
 **Note**: RAW formats (CR2, NEF, ARW) are not supported.
+
+### Output Formats (what gets saved to S3)
+
+You can choose the output format during processing configuration (Stage 2):
+
+**JPEG** (default)
+- Lossy compression with quality-based optimization
+- Smallest file sizes
+- Best for photographs
+- EXIF support (camera, date, GPS preserved)
+- Transparency removed (composited on white background)
+
+**PNG**
+- Lossless compression
+- Larger file sizes
+- Best for graphics, logos, or images requiring transparency
+- Transparency preserved (RGBA support)
+- Cannot optimize to target size (uses maximum compression)
+
+**WEBP**
+- Modern format with lossy compression
+- Balanced file size and quality
+- Good browser support for modern web
+- EXIF support (camera, date, GPS preserved)
+- Transparency removed (composited on white background)
 
 ## Error Handling
 
@@ -329,7 +360,7 @@ Uploaded files:
 
 ## EXIF Preservation
 
-The optimizer preserves the following EXIF fields:
+The optimizer preserves the following EXIF fields when using JPEG or WEBP output formats:
 - **Make**: Camera manufacturer
 - **Model**: Camera model
 - **DateTimeOriginal**: Date photo was taken
@@ -337,11 +368,16 @@ The optimizer preserves the following EXIF fields:
 - **DateTimeDigitized**: Date photo was digitized
 - **GPSInfo**: GPS coordinates
 
-Other EXIF data may be lost during JPEG recompression.
+Other EXIF data may be lost during recompression.
+
+**Note**: PNG has limited EXIF support. While the optimizer attempts to preserve EXIF data, PNG files typically do not store camera metadata.
 
 ## Optimization Strategy
 
-The optimizer uses iterative JPEG quality adjustment to reach target file size:
+The optimizer uses different strategies based on the output format:
+
+### JPEG and WEBP (Lossy Formats)
+Iterative quality adjustment to reach target file size:
 
 1. Checks if original is already smaller than target → uses quality 95
 2. Otherwise, tries quality levels: 95, 90, 85, 80, 75, 70, 65, 60
@@ -349,6 +385,16 @@ The optimizer uses iterative JPEG quality adjustment to reach target file size:
 4. If target not reached even at quality 60, saves at minimum quality with warning
 
 Images are converted to RGB if necessary (e.g., RGBA with transparency composited on white background).
+
+### PNG (Lossless Format)
+Maximum compression without quality loss:
+
+1. Uses compression level 9 (maximum)
+2. Cannot optimize to target size (lossless format)
+3. Preserves transparency (RGBA support)
+4. Warns if final size exceeds target
+
+Image mode is preserved when possible (RGB, RGBA, grayscale).
 
 ## Testing
 
@@ -364,6 +410,32 @@ pytest tests/test_photo_upload.py -v
 # Run with coverage
 pytest --cov=photo_terminal --cov-report=html
 ```
+
+## Environment Variables
+
+The following environment variables can be used to customize behavior:
+
+### PHOTO_TERMINAL_DEBUG
+Enable debug logging for troubleshooting:
+```bash
+export PHOTO_TERMINAL_DEBUG=1
+photo-upload ./images --prefix test
+```
+
+Debug logs are written to `/tmp/photo_terminal_debug.log` and include:
+- Terminal capabilities detection
+- TUI rendering events
+- Key press handling
+- Image caching operations
+
+### PHOTO_TERMINAL_ESC_TIMEOUT
+Adjust the timeout for ESC key detection (default: 0.10 seconds):
+```bash
+export PHOTO_TERMINAL_ESC_TIMEOUT=0.15
+photo-upload ./images
+```
+
+This controls how long the system waits to distinguish between a lone ESC press and escape sequences (like arrow keys). Increase if you experience issues with arrow key detection on slower terminals.
 
 ## Troubleshooting
 
@@ -400,6 +472,9 @@ aws s3 ls s3://two-touch/ --profile kurtis-site
 ```
 photo-terminal/
 ├── README.md                 # Main project documentation
+├── AGENT.md                  # Development agent guide
+├── SPEC.md                   # Project specification
+├── LICENSE                   # MIT License
 ├── pyproject.toml            # Package configuration
 ├── requirements.txt          # Python dependencies
 ├── photo_terminal/           # Source code package
@@ -407,24 +482,19 @@ photo-terminal/
 │   ├── __main__.py          # CLI entry point
 │   ├── config.py            # YAML configuration management
 │   ├── scanner.py           # Image format validation
-│   ├── tui.py               # Two-pane image selector
+│   ├── tui.py               # Two-pane image selector with multi-stage workflow
+│   ├── input_utils.py       # Keyboard input utilities
 │   ├── s3_browser.py        # Interactive S3 folder browser
 │   ├── confirmation.py      # Upload confirmation prompt
-│   ├── optimizer.py         # JPEG size-based optimization
+│   ├── optimizer.py         # Multi-format image optimization
 │   ├── processor.py         # Batch processing pipeline
 │   ├── duplicate_checker.py # S3 duplicate detection
 │   ├── uploader.py          # S3 upload with progress
 │   ├── dry_run.py           # Dry-run mode
 │   └── summary.py           # Completion summary display
-├── tests/                   # Test suite
-│   └── test_*.py            # Test files
-├── examples/                # Example scripts
-│   └── example_*.py         # Usage examples
-└── docs/                    # Additional documentation
-    └── *.md                 # Module documentation
+└── tests/                   # Test suite
+    └── test_*.py            # Test files
 ```
-
-See the `docs/` directory for detailed module documentation.
 
 ### Running Tests
 

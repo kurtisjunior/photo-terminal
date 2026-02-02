@@ -46,14 +46,15 @@ class InsufficientDiskSpaceError(Exception):
 
 def process_images(
     images: List[Path],
-    target_size_kb: int = 400
+    target_size_kb: int = 400,
+    output_format: str = 'JPEG'
 ) -> Tuple[tempfile.TemporaryDirectory, List[ProcessedImage]]:
     """Process multiple images with optimization and save to temp directory.
 
     Creates a temporary directory, checks available disk space, then processes
-    each image using the optimizer. Saves optimized images with original filenames
-    in the temp directory. Returns temp directory object (for lifecycle management)
-    and list of processing results.
+    each image using the optimizer. Saves optimized images with updated file
+    extensions based on output format in the temp directory. Returns temp
+    directory object (for lifecycle management) and list of processing results.
 
     The caller is responsible for managing the temp directory lifecycle:
     - On success: call temp_dir.cleanup() or let it auto-cleanup on exit
@@ -62,6 +63,7 @@ def process_images(
     Args:
         images: List of paths to image files to process
         target_size_kb: Target file size in kilobytes (default: 400)
+        output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
 
     Returns:
         Tuple of (temp_directory, processed_images):
@@ -71,11 +73,24 @@ def process_images(
     Raises:
         InsufficientDiskSpaceError: If not enough disk space for processing
         ProcessingError: If optimization fails on any image
-        ValueError: If images list is empty
+        ValueError: If images list is empty or invalid format
     """
     # Fail-fast: Empty images list
     if not images:
         raise ValueError("Images list cannot be empty")
+
+    # Validate output format
+    output_format = output_format.upper()
+    if output_format not in ('JPEG', 'PNG', 'WEBP'):
+        raise ValueError(f"Unsupported output format: {output_format}. Must be JPEG, PNG, or WEBP")
+
+    # Determine file extension for output format
+    format_extensions = {
+        'JPEG': '.jpg',
+        'PNG': '.png',
+        'WEBP': '.webp'
+    }
+    output_extension = format_extensions[output_format]
 
     # Create temporary directory
     temp_dir = tempfile.TemporaryDirectory(prefix="photo_upload_")
@@ -91,12 +106,14 @@ def process_images(
             # Show minimal progress feedback
             print(f"Processing image {idx}/{len(images)}...")
 
-            # Create output path with same filename in temp directory
-            output_path = temp_dir_path / image_path.name
+            # Create output path with updated extension for output format
+            # Replace original extension with output format extension
+            output_filename = image_path.stem + output_extension
+            output_path = temp_dir_path / output_filename
 
             try:
                 # Optimize image
-                result = optimize_image(image_path, output_path, target_size_kb)
+                result = optimize_image(image_path, output_path, target_size_kb, output_format)
 
                 # Create ProcessedImage metadata
                 processed = ProcessedImage(
