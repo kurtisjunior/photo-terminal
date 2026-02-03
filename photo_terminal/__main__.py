@@ -186,7 +186,38 @@ Configuration:
         print(f"  - {img.name}")
     print()
 
-    # Stage 2: Configure processing options
+    # Stage 2: Reorder images interactively (optional)
+    image_reorder_map = None
+    try:
+        response = input("Reorder images? (y/N): ").strip().lower()
+    except EOFError:
+        response = 'n'
+
+    if response in ('y', 'yes'):
+        try:
+            from photo_terminal.reorder_ui import reorder_images_interactive
+        except ImportError as e:
+            print(f"\nError: Missing required dependency for image reordering")
+            print(f"Install with: pip install readchar")
+            return 1
+
+        print()
+        result = reorder_images_interactive(selected_images)
+
+        if result is None:
+            print("\nReordering cancelled")
+            return 1
+        else:
+            # Store the reorder mapping
+            image_reorder_map = dict(result)
+            print()
+            print(f"✓ Images reordered - {len(result)} images will be uploaded with numeric prefixes")
+    else:
+        print("Skipping reorder - using original order")
+
+    print()
+
+    # Stage 3: Configure processing options
     try:
         processing_config = show_processing_config(selected_images, cfg.__dict__)
         if processing_config is None:
@@ -209,7 +240,7 @@ Configuration:
     print(f"  Output format:     {processing_config['output_format']}")
     print()
 
-    # S3 folder browser (Task #5)
+    # Stage 4: S3 folder browser
     # Skip browser if --prefix was provided via CLI
     try:
         selected_prefix = browse_s3_folders(
@@ -228,36 +259,11 @@ Configuration:
         print(f"Upload target: s3://{cfg.bucket}/ (root)")
     print()
 
-    # Selection confirmation with count display (Task #6)
+    # Upload confirmation
     try:
         confirm_upload(selected_images, cfg.bucket, selected_prefix)
     except SystemExit:
         return 1
-
-    # Reorder images interactively (optional)
-    print()
-    print("Reorder images? (y/N): ", end="", flush=True)
-    import sys
-    response = sys.stdin.readline().strip().lower()
-
-    image_reorder_map = None
-    if response in ('y', 'yes'):
-        from photo_terminal.reorder_ui import reorder_images_interactive
-
-        print()
-        result = reorder_images_interactive(selected_images)
-
-        if result is None:
-            print("Reordering cancelled - using original order")
-        else:
-            # Store the reorder mapping
-            image_reorder_map = dict(result)
-            print()
-            print(f"✓ Images reordered - {len(result)} images will be uploaded with numeric prefixes")
-    else:
-        print("Skipping reorder - using original order")
-
-    print()
 
     # Check if dry-run mode is enabled
     if args.dry_run:

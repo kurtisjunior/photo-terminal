@@ -1,258 +1,239 @@
-"""Interactive UI for image reordering with Rich library.
+"""Interactive UI for image reordering with visual preview.
 
-Provides a slick, keyboard-driven interface for reordering images
-using grab-and-drop interaction model.
+Uses the same two-pane rendering as Stage 1 (tui.py) with grab-and-drop reordering.
 """
 
 from pathlib import Path
 from typing import List, Optional, Tuple
+import os
+import subprocess
 import sys
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-from rich.layout import Layout
-from rich.live import Live
-from rich import box
+import termios
+import tty
 
 from photo_terminal.reorder import ImageReorderer, generate_prefixed_filenames, get_final_filenames_preview
+from photo_terminal.tui import check_viu_availability, TerminalCapabilities
 
 
-class ReorderUI:
-    """Interactive UI for reordering images.
+class ReorderImageSelector:
+    """Image reorderer with two-pane TUI (same rendering as Stage 1)."""
 
-    Provides a slick interface with keyboard controls:
-    - j/k or ↑/↓: Navigate up/down
-    - Space: Grab/drop current image
-    - r: Reset to original order
-    - Enter: Confirm and continue
-    - q: Cancel and exit
-
-    Uses Rich library for smooth real-time rendering.
-    """
-
-    def __init__(self, images: List[Path], console: Optional[Console] = None):
-        """Initialize reorder UI.
+    def __init__(self, images: List[Path]):
+        """Initialize reorder selector.
 
         Args:
             images: List of image paths to reorder
-            console: Optional Rich Console instance (creates new if None)
-
-        Raises:
-            ValueError: If images list is empty
         """
         if not images:
             raise ValueError("Images list cannot be empty")
 
         self.reorderer = ImageReorderer(images)
-        self.console = console or Console()
-        self.should_exit = False
-        self.cancelled = False
+        self._image_cache = {}
+        self._first_render = True
+        self._protocol = TerminalCapabilities.detect_graphics_protocol()
 
-    def _render(self) -> Panel:
-        """Render the current UI state.
+    def _get_preview_lines(self, image_path: Path, width: int, height: int) -> List[str]:
+        """Get cached preview lines for an image (same as tui.py)."""
+        # Detect if we should use graphics protocol or blocks
+        use_blocks = self._protocol == 'blocks'
+        cache_key = f"{'blocks' if use_blocks else 'graphics'}:{image_path}:{width}:{height}"
 
-        Returns:
-            Rich Panel containing the full UI
-        """
-        layout = Layout()
-        layout.split_column(
-            Layout(name="header", size=1),
-            Layout(name="main"),
-            Layout(name="preview", size=3),
-            Layout(name="controls", size=3)
-        )
+        if cache_key in self._image_cache:
+            return self._image_cache[cache_key]
 
-        # Header
+        try:
+            # Use graphics protocol if available (better quality), otherwise use blocks
+            if use_blocks:
+                cmd = ["viu", "-b", "-w", str(width), "-h", str(height), str(image_path)]
+            else:
+                # Graphics protocol - no -b flag for high quality
+                cmd = ["viu", "-w", str(width), "-h", str(height), str(image_path)]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=False,
+                timeout=3
+            )
+            if result.returncode == 0:
+                lines = result.stdout.decode('utf-8', errors='replace').splitlines()
+                self._image_cache[cache_key] = lines
+                return lines
+        except Exception:
+            pass
+        return ["[Preview error]"]
+
+    def _create_file_list_lines(self) -> List[str]:
+        """Create file list display lines."""
         images = self.reorderer.get_ordered_images()
-        header_text = Text(f"Reorder Images ({len(images)} selected)", style="bold cyan")
-        layout["header"].update(header_text)
-
-        # Main image list
-        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
-        table.add_column("Cursor", width=3)
-        table.add_column("Number", width=4)
-        table.add_column("Filename", style="white")
-
         current_idx = self.reorderer.get_current_index()
         grabbed_idx = self.reorderer.get_grabbed_index()
 
+        lines = []
+        lines.append("╔═══════════════════════════════════════════════════╗")
+        lines.append(f"║ Reorder Images ({len(images)} selected)")
+        lines.append("╠═══════════════════════════════════════════════════╣")
+        lines.append("║")
+
         for idx, img_path in enumerate(images):
-            # Cursor indicator
-            if idx == current_idx:
-                cursor = "→" if grabbed_idx is None else "✱"
-                cursor_style = "bold yellow" if grabbed_idx is None else "bold green"
+            # Cursor and grabbed indicators
+            if idx == current_idx and grabbed_idx is not None:
+                cursor = "✱"
+            elif idx == current_idx:
+                cursor = "→"
             else:
-                cursor = ""
-                cursor_style = "dim"
+                cursor = " "
 
             # Position number
             pos = f"{idx + 1}."
 
-            # Filename with styling
+            # Filename (truncate if needed)
             filename = img_path.name
+            if len(filename) > 35:
+                filename = filename[:32] + "..."
+
+            # Add grabbed indicator
             if idx == grabbed_idx:
-                # Grabbed item - highlight
-                filename_style = "bold green"
+                line = f"║ \033[1;32m{cursor}\033[0m {pos:3} \033[1;32m{filename}\033[0m"
             elif idx == current_idx:
-                # Current selection
-                filename_style = "bold yellow"
+                line = f"║ \033[1;33m{cursor}\033[0m {pos:3} \033[1;33m{filename}\033[0m"
             else:
-                # Normal item
-                filename_style = "white"
+                line = f"║ {cursor} {pos:3} {filename}"
 
-            table.add_row(
-                Text(cursor, style=cursor_style),
-                Text(pos, style="dim"),
-                Text(filename, style=filename_style)
-            )
+            lines.append(line)
 
-        layout["main"].update(table)
+        lines.append("║")
+        lines.append("╟───────────────────────────────────────────────────╢")
+        lines.append("║ Final upload order:")
+        preview = get_final_filenames_preview(images)
+        if len(preview) > 45:
+            preview = preview[:42] + "..."
+        lines.append(f"║ \033[36m{preview}\033[0m")
+        lines.append("╟───────────────────────────────────────────────────╢")
+        lines.append("║ SPACE: grab/drop  ↑↓/j/k: move  r: reset")
+        lines.append("║ ENTER: confirm  q: cancel")
+        lines.append("╚═══════════════════════════════════════════════════╝")
 
-        # Preview of final filenames
-        preview_text = Text()
-        preview_text.append("Final upload names:\n", style="dim")
-        preview_text.append(get_final_filenames_preview(images), style="cyan")
-        layout["preview"].update(preview_text)
+        return lines
 
-        # Controls
-        controls = Table.grid(padding=(0, 2))
-        controls.add_row(
-            Text("SPACE", style="bold"),
-            Text("grab/drop", style="dim"),
-            Text("•", style="dim"),
-            Text("↑↓ or j/k", style="bold"),
-            Text("move", style="dim"),
-            Text("•", style="dim"),
-            Text("r", style="bold"),
-            Text("reset", style="dim")
-        )
-        controls.add_row(
-            Text("ENTER", style="bold green"),
-            Text("confirm", style="dim"),
-            Text("•", style="dim"),
-            Text("q", style="bold red"),
-            Text("cancel", style="dim"),
-            Text("", style="dim"),
-            Text("", style="dim"),
-            Text("", style="dim")
-        )
-        layout["controls"].update(controls)
+    def render(self):
+        """Render two-pane UI (same approach as tui.py render_with_blocks)."""
+        # Anti-flicker optimization
+        if self._first_render:
+            sys.stdout.write('\033[2J\033[H')
+            self._first_render = False
+        else:
+            sys.stdout.write('\033[H')
+        sys.stdout.flush()
 
-        # Wrap in panel
-        panel = Panel(
-            layout,
-            border_style="cyan",
-            box=box.ROUNDED
-        )
+        # Get dimensions
+        terminal_size = os.get_terminal_size()
+        file_list_column = 1
+        file_list_width = 53
+        image_column = file_list_width + 3
+        image_width = max(40, min(terminal_size.columns - image_column - 2, 70))
+        image_height = max(15, min(terminal_size.lines - 5, 35))
 
-        return panel
+        # Get current image preview
+        images = self.reorderer.get_ordered_images()
+        current_idx = self.reorderer.get_current_index()
+        current_image = images[current_idx]
+        preview_lines = self._get_preview_lines(current_image, image_width, image_height)
 
-    def _handle_key(self, key: str) -> bool:
-        """Handle keyboard input.
+        # Get file list
+        file_list_lines = self._create_file_list_lines()
 
-        Args:
-            key: Key pressed by user
+        # Render side-by-side
+        max_lines = max(len(file_list_lines), len(preview_lines))
+        for row in range(max_lines):
+            # File list on left
+            if row < len(file_list_lines):
+                sys.stdout.write(f'\033[{row + 1};{file_list_column}H')
+                sys.stdout.write(file_list_lines[row])
 
-        Returns:
-            True if UI should continue, False if should exit
-        """
-        # Navigation
-        if key in ('j', 'down'):
-            self.reorderer.move_down()
-        elif key in ('k', 'up'):
-            self.reorderer.move_up()
+            # Preview on right
+            if row < len(preview_lines):
+                sys.stdout.write(f'\033[{row + 1};{image_column}H')
+                sys.stdout.write(preview_lines[row])
 
-        # Grab/drop
-        elif key == ' ':
-            self.reorderer.toggle_grab()
-
-        # Reset
-        elif key == 'r':
-            self.reorderer.reset()
-
-        # Confirm
-        elif key in ('enter', '\r', '\n'):
-            self.should_exit = True
-            return False
-
-        # Cancel
-        elif key in ('q', 'Q'):
-            self.cancelled = True
-            self.should_exit = True
-            return False
-
-        return True
+        sys.stdout.flush()
 
     def run(self) -> Optional[List[Tuple[Path, str]]]:
         """Run the interactive reorder UI.
 
-        Displays the UI and handles keyboard input until user confirms or cancels.
-
         Returns:
             List of (original_path, prefixed_filename) tuples if confirmed,
             None if cancelled
-
-        Example:
-            ui = ReorderUI(image_paths)
-            result = ui.run()
-            if result:
-                # User confirmed order
-                for original, new_name in result:
-                    print(f"{original} → {new_name}")
         """
-        # Import here to avoid issues on systems without proper terminal support
+        # Check viu availability
+        if not check_viu_availability():
+            print("Warning: viu not available, preview will be limited")
+
+        # Save terminal settings
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+
         try:
-            import readchar
-        except ImportError:
-            self.console.print(
-                "[red]Error: readchar library not installed. "
-                "Install with: pip install readchar[/red]"
-            )
+            # Set raw mode
+            tty.setraw(fd)
+
+            # Hide cursor
+            sys.stdout.write('\033[?25l')
+            sys.stdout.flush()
+
+            # Initial render
+            self.render()
+
+            while True:
+                # Read key
+                char = sys.stdin.read(1)
+
+                # Handle escape sequences
+                if char == '\x1b':
+                    next_char = sys.stdin.read(1)
+                    if next_char == '[':
+                        arrow = sys.stdin.read(1)
+                        if arrow == 'A':  # Up
+                            self.reorderer.move_up()
+                        elif arrow == 'B':  # Down
+                            self.reorderer.move_down()
+                    else:
+                        # Lone ESC = cancel
+                        return None
+
+                # Handle regular keys
+                elif char in ('j', 'J'):
+                    self.reorderer.move_down()
+                elif char in ('k', 'K'):
+                    self.reorderer.move_up()
+                elif char == ' ':  # Space = grab/drop
+                    self.reorderer.toggle_grab()
+                elif char in ('r', 'R'):  # Reset
+                    self.reorderer.reset()
+                elif char in ('\r', '\n'):  # Enter = confirm
+                    ordered_images = self.reorderer.get_ordered_images()
+                    return generate_prefixed_filenames(ordered_images)
+                elif char in ('q', 'Q'):  # Quit
+                    return None
+                elif char == '\x03':  # Ctrl+C
+                    raise KeyboardInterrupt
+
+                # Redraw
+                self.render()
+
+        except KeyboardInterrupt:
             return None
 
-        # Run live display
-        with Live(self._render(), console=self.console, refresh_per_second=10) as live:
-            while not self.should_exit:
-                try:
-                    # Read a key (blocking)
-                    key = readchar.readkey()
-
-                    # Map arrow keys
-                    if key == readchar.key.UP:
-                        key = 'up'
-                    elif key == readchar.key.DOWN:
-                        key = 'down'
-                    elif key == readchar.key.ENTER or key == '\r' or key == '\n':
-                        key = 'enter'
-
-                    # Handle the key
-                    should_continue = self._handle_key(key)
-
-                    if not should_continue:
-                        break
-
-                    # Update display
-                    live.update(self._render())
-
-                except KeyboardInterrupt:
-                    # Ctrl+C pressed - cancel
-                    self.cancelled = True
-                    break
-
-        # Return result
-        if self.cancelled:
-            return None
-
-        ordered_images = self.reorderer.get_ordered_images()
-        return generate_prefixed_filenames(ordered_images)
+        finally:
+            # Restore terminal
+            sys.stdout.write('\033[?25h')  # Show cursor
+            sys.stdout.write('\033[2J\033[H')  # Clear screen
+            sys.stdout.flush()
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def reorder_images_interactive(images: List[Path]) -> Optional[List[Tuple[Path, str]]]:
-    """Interactive function to reorder images.
-
-    Convenience function that creates UI and runs it.
+    """Interactive function to reorder images with visual preview.
 
     Args:
         images: List of image paths to reorder
@@ -260,15 +241,9 @@ def reorder_images_interactive(images: List[Path]) -> Optional[List[Tuple[Path, 
     Returns:
         List of (original_path, prefixed_filename) tuples if confirmed,
         None if cancelled
-
-    Example:
-        result = reorder_images_interactive(image_paths)
-        if result:
-            for original, new_name in result:
-                process_image(original, new_name)
     """
     if not images:
         return None
 
-    ui = ReorderUI(images)
-    return ui.run()
+    selector = ReorderImageSelector(images)
+    return selector.run()
