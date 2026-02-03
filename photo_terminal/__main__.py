@@ -120,7 +120,7 @@ Examples:
   %(prog)s ./vacation --prefix spain/barcelona --dry-run
 
 Configuration:
-  Edit ~/.photo-uploader.yaml to change default settings.
+  Edit photo-uploader.yaml to change default settings.
   CLI arguments override config file values.
         """
     )
@@ -234,6 +234,31 @@ Configuration:
     except SystemExit:
         return 1
 
+    # Reorder images interactively (optional)
+    print()
+    print("Reorder images? (y/N): ", end="", flush=True)
+    import sys
+    response = sys.stdin.readline().strip().lower()
+
+    image_reorder_map = None
+    if response in ('y', 'yes'):
+        from photo_terminal.reorder_ui import reorder_images_interactive
+
+        print()
+        result = reorder_images_interactive(selected_images)
+
+        if result is None:
+            print("Reordering cancelled - using original order")
+        else:
+            # Store the reorder mapping
+            image_reorder_map = dict(result)
+            print()
+            print(f"✓ Images reordered - {len(result)} images will be uploaded with numeric prefixes")
+    else:
+        print("Skipping reorder - using original order")
+
+    print()
+
     # Check if dry-run mode is enabled
     if args.dry_run:
         # Run dry-run mode (shows sizes, exits without uploading)
@@ -280,7 +305,9 @@ Configuration:
         temp_dir, processed_images = process_images(
             selected_images,
             target_size if target_size else cfg.target_size_kb,
-            processing_config['output_format']
+            processing_config['output_format'],
+            max_dimension=1920,
+            filename_map=image_reorder_map
         )
     except InsufficientDiskSpaceError as e:
         print(f"Error: {e}")

@@ -39,12 +39,13 @@ def optimize_image(
     input_path: Path,
     output_path: Path,
     target_size_kb: int = 400,
-    output_format: str = 'JPEG'
+    output_format: str = 'JPEG',
+    max_dimension: int = 1920
 ) -> Dict:
-    """Optimize image to target file size with EXIF preservation.
+    """Optimize image to target file size with EXIF preservation and resizing.
 
-    Opens image with Pillow, extracts EXIF data, and iteratively saves
-    with decreasing quality until target size is reached. Preserves
+    Opens image with Pillow, resizes if needed, extracts EXIF data, and iteratively
+    saves with decreasing quality until target size is reached. Preserves aspect ratio,
     camera model, date taken, and GPS coordinates.
 
     Args:
@@ -52,6 +53,8 @@ def optimize_image(
         output_path: Path where optimized image will be saved
         target_size_kb: Target file size in kilobytes (default: 400)
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
+        max_dimension: Maximum width or height in pixels (default: 1920).
+                      Images larger than this will be resized proportionally.
 
     Returns:
         Dictionary with optimization results:
@@ -60,6 +63,9 @@ def optimize_image(
             - quality_used: Quality/compression level used (format-dependent)
             - format: Original image format
             - output_format: Output format used
+            - resized: Boolean indicating if image was resized
+            - original_dimensions: Tuple of (width, height) before resize
+            - final_dimensions: Tuple of (width, height) after resize
             - warnings: List of warning messages (if any)
 
     Raises:
@@ -85,8 +91,26 @@ def optimize_image(
     except Exception as e:
         raise ValueError(f"Cannot open image file: {input_path}. Error: {e}")
 
-    # Store original format for reporting
+    # Store original format and dimensions for reporting
     original_format = img.format or "UNKNOWN"
+    original_dimensions = (img.width, img.height)
+
+    # Resize if image exceeds max dimension
+    resized = False
+    if img.width > max_dimension or img.height > max_dimension:
+        # Calculate new dimensions preserving aspect ratio
+        if img.width > img.height:
+            new_width = max_dimension
+            new_height = int((max_dimension / img.width) * img.height)
+        else:
+            new_height = max_dimension
+            new_width = int((max_dimension / img.height) * img.width)
+
+        # Resize using high-quality Lanczos resampling
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        resized = True
+
+    final_dimensions = (img.width, img.height)
 
     # Convert to appropriate mode for output format
     if output_format == 'PNG':
@@ -136,27 +160,13 @@ def optimize_image(
             'quality_used': 9,  # compression level
             'format': original_format,
             'output_format': output_format,
+            'resized': resized,
+            'original_dimensions': original_dimensions,
+            'final_dimensions': final_dimensions,
             'warnings': warnings
         }
 
-    # For JPEG and WEBP, use quality iteration
-    # If image is already smaller than target, use quality 95
-    if original_size <= target_size_bytes:
-        quality = 95
-        _save_image(img, output_path, output_format, quality=quality, exif_data=exif_data)
-        final_size = output_path.stat().st_size
-
-        warnings = exif_warnings.copy()
-        return {
-            'original_size': original_size,
-            'final_size': final_size,
-            'quality_used': quality,
-            'format': original_format,
-            'output_format': output_format,
-            'warnings': warnings
-        }
-
-    # Iteratively try quality levels to reach target size
+    # For JPEG and WEBP, use quality iteration to reach target size
     quality_used = None
     final_size = None
     warnings = exif_warnings.copy()
@@ -186,6 +196,9 @@ def optimize_image(
         'quality_used': quality_used,
         'format': original_format,
         'output_format': output_format,
+        'resized': resized,
+        'original_dimensions': original_dimensions,
+        'final_dimensions': final_dimensions,
         'warnings': warnings
     }
 

@@ -7,7 +7,9 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 ## Features
 
 - **Two-Pane TUI**: File list (top) with live image preview (bottom) for image selection
+- **Interactive Image Reordering**: Grab-and-drop interface to control upload order with numeric prefixes
 - **Interactive S3 Folder Browser**: Navigate existing S3 bucket structure to select upload target
+- **Automatic Image Resizing**: Resizes to 1920px (configurable) for optimal web size
 - **Size-Based JPEG Optimization**: Target ~400KB file size (configurable)
 - **EXIF Preservation**: Maintains camera model, date taken, and GPS coordinates
 - **Duplicate Detection**: Pre-checks S3 to prevent accidental overwrites
@@ -61,7 +63,7 @@ Enter your AWS credentials when prompted. Make sure your profile has permissions
 
 ## Configuration
 
-On first run, a configuration file will be created at `~/.photo-uploader.yaml` with defaults:
+On first run, a configuration file will be created at `photo-uploader.yaml` with defaults:
 
 ```yaml
 bucket: two-touch
@@ -135,7 +137,7 @@ photo-upload ./photos --prefix france/paris --dry-run
 
 The application follows this multi-stage workflow:
 
-1. **Load Configuration**: Reads `~/.photo-uploader.yaml`
+1. **Load Configuration**: Reads `photo-uploader.yaml`
 2. **Parse CLI Arguments**: Overrides config values if specified
 3. **Scan Folder**: Validates images (JPEG, PNG, WEBP, TIFF, BMP, GIF)
 4. **Stage 1 - Select Images**: Two-pane TUI with live preview
@@ -148,12 +150,18 @@ The application follows this multi-stage workflow:
    - Confirm with `Enter` or go back with `b`
 6. **Browse S3 Folders**: Interactive folder browser (if --prefix not specified)
 7. **Confirm Upload**: Shows count and target location
-8. **Dry-Run Check**: If --dry-run flag set, shows preview and exits
-9. **Check Duplicates**: Pre-validates no files exist in S3 target
-10. **Process Images**: Optimizes with JPEG quality iteration
-11. **Upload to S3**: Batch upload with progress spinner
-12. **Show Summary**: Displays completion statistics
-13. **Cleanup**: Removes temp files on success
+8. **Reorder Images** (Optional): Interactive grab-and-drop interface
+   - Navigate with `↑↓` or `j/k`
+   - Press `Space` to grab/drop images
+   - Press `r` to reset to original order
+   - Press `Enter` to confirm order
+   - Images uploaded with numeric prefixes (01_, 02_, 03_)
+9. **Dry-Run Check**: If --dry-run flag set, shows preview and exits
+10. **Check Duplicates**: Pre-validates no files exist in S3 target
+11. **Process Images**: Resizes to 1920px and optimizes with JPEG quality iteration
+12. **Upload to S3**: Batch upload with progress spinner
+13. **Show Summary**: Displays completion statistics
+14. **Cleanup**: Removes temp files on success
 
 ## Multi-Stage Workflow Example
 
@@ -175,6 +183,41 @@ photo-upload /path/to/photos --prefix japan/tokyo
 ### 3. Configure processing (Stage 2)
 - Three options appear: "Resize images", "Preserve EXIF data", and "Output format"
 - Resize and EXIF preservation are enabled by default
+
+### 4. Reorder images (Optional)
+When prompted "Reorder images? (y/N):", press `y` to enter the interactive reordering interface:
+
+```
+┌─ Reorder Images (3 selected) ──────────────────────────┐
+│                                                         │
+│  →  1. IMG_2027.JPG          Preview:                  │
+│     2. IMG_2032.JPG          [████████████]            │
+│     3. IMG_2033.JPG          [████ image ████]         │
+│                                                         │
+│  Final upload names:                                   │
+│  01_IMG_2027.JPG → 02_IMG_2032.JPG → 03_IMG_2033.JPG  │
+│                                                         │
+│  SPACE to grab/drop  •  ↑↓ or j/k to move  •  r reset │
+│  ENTER when done                                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Keyboard Controls:**
+- `↑↓` or `j/k`: Navigate through images
+- `Space`: Grab current image (press again to drop)
+- `r`: Reset to original order
+- `Enter`: Confirm order and continue
+- `q`: Cancel reordering
+
+**How it works:**
+1. Navigate to the image you want to move
+2. Press `Space` to "grab" it (highlights in green)
+3. Use arrow keys to move it up or down
+4. Press `Space` again to "drop" it in the new position
+5. Repeat for other images
+6. Press `Enter` when done
+
+Images will be uploaded with numeric prefixes (01_, 02_, 03_, etc.) to maintain the order you specified on S3.
 - Output format defaults to JPEG
 - Use arrow keys to navigate between options
 - Press `Space` to toggle options on/off, or cycle through output formats (JPEG → PNG → WEBP)

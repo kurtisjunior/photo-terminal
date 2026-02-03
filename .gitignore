@@ -50,6 +50,7 @@ Thumbs.db
 test_images/
 temp_*/
 photo_upload_*/
+photo-uploader.yaml
 
 # Planwheel
 .planwheel/

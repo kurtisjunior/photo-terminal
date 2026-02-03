@@ -422,25 +422,31 @@ class TestAspectRatioPreservation:
     """Test that aspect ratio is preserved."""
 
     def test_dimensions_preserved(self, large_image_with_exif, temp_dir):
-        """Test that image dimensions are not changed."""
+        """Test that aspect ratio is preserved after resizing."""
         output_path = temp_dir / "output.jpg"
 
-        # Get original dimensions
+        # Get original dimensions and aspect ratio
         with Image.open(large_image_with_exif) as img:
-            original_size = img.size
+            original_width, original_height = img.size
+            original_aspect = original_width / original_height
 
         optimize_image(
             large_image_with_exif,
             output_path,
-            target_size_kb=400
+            target_size_kb=400,
+            max_dimension=1920
         )
 
-        # Check output dimensions
+        # Check output dimensions and aspect ratio
         with Image.open(output_path) as img:
-            output_size = img.size
+            output_width, output_height = img.size
+            output_aspect = output_width / output_height
 
-        # Dimensions should be exactly the same
-        assert original_size == output_size
+        # Aspect ratio should be preserved (within 1% tolerance)
+        assert abs(original_aspect - output_aspect) / original_aspect < 0.01
+
+        # Should be resized to max dimension since original is 3000x2000
+        assert max(output_width, output_height) == 1920
 
 
 class TestReturnedMetadata:

@@ -1,6 +1,6 @@
 """Configuration management for photo uploader.
 
-Loads configuration from ~/.photo-uploader.yaml with auto-initialization
+Loads configuration from photo-uploader.yaml with auto-initialization
 on first run. Supports CLI override pattern for all config values.
 """
 
@@ -38,14 +38,14 @@ DEFAULT_CONFIG = {
     'target_size_kb': 400
 }
 
-CONFIG_PATH = Path.home() / '.photo-uploader.yaml'
+CONFIG_PATH = Path.cwd() / 'photo-uploader.yaml'
 
 
 def load_config(config_path: Optional[Path] = None) -> Config:
     """Load configuration from YAML file, creating it with defaults if needed.
 
     Args:
-        config_path: Path to config file. Defaults to ~/.photo-uploader.yaml
+        config_path: Path to config file. Defaults to photo-uploader.yaml in current directory
 
     Returns:
         Config object with loaded values

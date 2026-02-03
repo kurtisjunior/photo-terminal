@@ -71,8 +71,9 @@ def upload_images(
 
     try:
         for idx, processed_img in enumerate(processed_images, start=1):
-            # Construct S3 key
-            s3_key = _construct_s3_key(normalized_prefix, processed_img.original_path.name)
+            # Construct S3 key - use upload_filename if set (for reordering), otherwise use original name
+            filename = processed_img.upload_filename if processed_img.upload_filename else processed_img.original_path.name
+            s3_key = _construct_s3_key(normalized_prefix, filename)
 
             # Show progress with spinner
             _show_progress(idx, total_count)

@@ -25,6 +25,7 @@ class ProcessedImage:
         final_size: Final file size in bytes after optimization
         quality_used: JPEG quality level used (60-95)
         warnings: List of warning messages from optimization
+        upload_filename: Optional custom filename for upload (e.g., with numeric prefix)
     """
     original_path: Path
     temp_path: Path
@@ -32,6 +33,7 @@ class ProcessedImage:
     final_size: int
     quality_used: int
     warnings: List[str]
+    upload_filename: str = None
 
 
 class ProcessingError(Exception):
@@ -47,14 +49,16 @@ class InsufficientDiskSpaceError(Exception):
 def process_images(
     images: List[Path],
     target_size_kb: int = 400,
-    output_format: str = 'JPEG'
+    output_format: str = 'JPEG',
+    max_dimension: int = 1920,
+    filename_map: dict = None
 ) -> Tuple[tempfile.TemporaryDirectory, List[ProcessedImage]]:
     """Process multiple images with optimization and save to temp directory.
 
     Creates a temporary directory, checks available disk space, then processes
-    each image using the optimizer. Saves optimized images with updated file
-    extensions based on output format in the temp directory. Returns temp
-    directory object (for lifecycle management) and list of processing results.
+    each image using the optimizer. Resizes images if needed, then saves optimized
+    images with updated file extensions based on output format in the temp directory.
+    Returns temp directory object (for lifecycle management) and list of processing results.
 
     The caller is responsible for managing the temp directory lifecycle:
     - On success: call temp_dir.cleanup() or let it auto-cleanup on exit
@@ -64,6 +68,8 @@ def process_images(
         images: List of paths to image files to process
         target_size_kb: Target file size in kilobytes (default: 400)
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
+        max_dimension: Maximum width or height in pixels (default: 1920)
+        filename_map: Optional dict mapping original Path to new filename (for reordering)
 
     Returns:
         Tuple of (temp_directory, processed_images):
@@ -107,13 +113,23 @@ def process_images(
             print(f"Processing image {idx}/{len(images)}...")
 
             # Create output path with updated extension for output format
-            # Replace original extension with output format extension
-            output_filename = image_path.stem + output_extension
+            # Use custom filename from filename_map if provided (for reordering)
+            if filename_map and image_path in filename_map:
+                # Use the mapped filename (already has extension from reorder logic)
+                upload_filename = filename_map[image_path]
+                # Extract stem and replace extension with output format extension
+                mapped_stem = Path(upload_filename).stem
+                output_filename = mapped_stem + output_extension
+            else:
+                # No mapping - use original filename
+                output_filename = image_path.stem + output_extension
+                upload_filename = None
+
             output_path = temp_dir_path / output_filename
 
             try:
-                # Optimize image
-                result = optimize_image(image_path, output_path, target_size_kb, output_format)
+                # Optimize image (with resizing if needed)
+                result = optimize_image(image_path, output_path, target_size_kb, output_format, max_dimension)
 
                 # Create ProcessedImage metadata
                 processed = ProcessedImage(
@@ -122,7 +138,8 @@ def process_images(
                     original_size=result['original_size'],
                     final_size=result['final_size'],
                     quality_used=result['quality_used'],
-                    warnings=result['warnings']
+                    warnings=result['warnings'],
+                    upload_filename=upload_filename
                 )
                 processed_images.append(processed)
 

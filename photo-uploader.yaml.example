@@ -1,0 +1,11 @@
+# Photo Upload Configuration
+# Copy this file to photo-uploader.yaml and edit with your settings
+
+# S3 bucket name for uploads
+bucket: your-bucket-name
+
+# AWS CLI profile name to use
+aws_profile: your-aws-profile
+
+# Target file size in kilobytes for JPEG optimization
+target_size_kb: 400

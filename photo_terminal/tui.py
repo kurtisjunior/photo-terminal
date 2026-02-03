@@ -718,7 +718,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
 
     Args:
         locked_images: List of selected image paths
-        config: Configuration dict from ~/.photo-uploader.yaml
+        config: Configuration dict from photo-uploader.yaml
 
     Returns:
         Processing configuration dict with user's choices
@@ -764,37 +764,37 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         table.add_column("Value", justify="right")
 
         # Resize option
-        checkbox = "[x]" if options['resize'] else "[ ]"
+        resize_checkbox = "[x]" if options['resize'] else "[ ]"
         if current_option == 0:
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Resize images", style="bold cyan"),
                 Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB", style="cyan"),
-                Text(checkbox, style="bold cyan")
+                Text(resize_checkbox, style="bold cyan")
             )
         else:
             table.add_row(
-                "",
-                "Resize images",
-                f"Optimize to ~{config.get('target_size_kb', 400)}KB",
-                checkbox
+                Text(""),
+                Text("Resize images"),
+                Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB"),
+                Text(resize_checkbox)
             )
 
         # EXIF preservation option
-        checkbox = "[x]" if options['preserve_exif'] else "[ ]"
+        exif_checkbox = "[x]" if options['preserve_exif'] else "[ ]"
         if current_option == 1:
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Preserve EXIF data", style="bold cyan"),
                 Text("Keep camera, date, GPS info", style="cyan"),
-                Text(checkbox, style="bold cyan")
+                Text(exif_checkbox, style="bold cyan")
             )
         else:
             table.add_row(
-                "",
-                "Preserve EXIF data",
-                "Keep camera, date, GPS info",
-                checkbox
+                Text(""),
+                Text("Preserve EXIF data"),
+                Text("Keep camera, date, GPS info"),
+                Text(exif_checkbox)
             )
 
         # Output format option
@@ -814,10 +814,10 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
             )
         else:
             table.add_row(
-                "",
-                "Output format",
-                format_desc,
-                format_value
+                Text(""),
+                Text("Output format"),
+                Text(format_desc),
+                Text(format_value)
             )
 
         # Display table in panel
@@ -828,7 +828,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         controls = Text()
         controls.append("↑/↓: Navigate  ", style="dim")
         controls.append("Space: Toggle/Cycle  ", style="dim")
-        controls.append("Enter: Confirm  ", style="dim")
+        controls.append("y: Confirm  ", style="dim")
         controls.append("b: Go Back  ", style="dim")
         controls.append("q/Esc: Cancel", style="dim")
         console.print(controls)
@@ -874,7 +874,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
                     # Toggle boolean option
                     options[option_key] = not options[option_key]
 
-            elif char == '\r' or char == '\n':  # Enter - confirm
+            elif char == 'y' or char == 'Y':  # Y - confirm
                 # Build result dictionary
                 result = {
                     'resize': options['resize'],
