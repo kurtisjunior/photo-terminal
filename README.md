@@ -2,8 +2,6 @@
 
 A terminal-based image upload manager with two-pane TUI interface, providing interactive file selection, high-quality image previews that automatically adapt to your terminal capabilities, and batch JPEG optimization for S3 uploads.
 
-**Project ID**: 4d942c5e
-
 ## Features
 
 - **Two-Pane TUI**: File list (left) with live image preview (right) for image selection
@@ -67,8 +65,8 @@ Enter your AWS credentials when prompted. Make sure your profile has permissions
 On first run, a configuration file will be created at `photo-uploader.yaml` with defaults:
 
 ```yaml
-bucket: two-touch
-aws_profile: kurtis-site
+bucket: some-bucket-name
+aws_profile: some-aws-profile
 target_size_kb: 400
 ```
 
