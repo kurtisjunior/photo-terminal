@@ -6,7 +6,8 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ## Features
 
-- **Two-Pane TUI**: File list (top) with live image preview (bottom) for image selection
+- **Two-Pane TUI**: File list (left) with live image preview (right) for image selection
+- **Responsive Preview Rendering**: Asynchronous preview generation with a loading indicator on cache misses
 - **Interactive Image Reordering**: Grab-and-drop interface to control upload order with numeric prefixes
 - **Interactive S3 Folder Browser**: Navigate existing S3 bucket structure to select upload target
 - **Automatic Image Resizing**: Resizes to 1920px (configurable) for optimal web size
@@ -140,7 +141,7 @@ The application follows this multi-stage workflow:
 1. **Load Configuration**: Reads `photo-uploader.yaml`
 2. **Parse CLI Arguments**: Overrides config values if specified
 3. **Scan Folder**: Validates images (JPEG, PNG, WEBP, TIFF, BMP, GIF)
-4. **Stage 1 - Select Images**: Two-pane TUI with live preview
+4. **Stage 1 - Select Images**: Two-pane TUI with live preview (asynchronous rendering)
    - Mark images with `y` or `Space` (shows `[x]`)
    - Lock selections with `Enter` (prevents accidental changes)
    - Proceed to next stage with `n`
@@ -175,7 +176,7 @@ photo-upload /path/to/photos --prefix japan/tokyo
 ### 2. Select images (Stage 1)
 - Navigate through images with arrow keys
 - Press `y` or `Space` to mark images you want to upload (they show `[x]`)
-- Preview appears on the right side as you navigate
+- Preview appears on the right side as you navigate, with a loading indicator on cache misses
 - Select multiple images by marking each one
 - Press `Enter` to lock your selections (green confirmation appears)
 - Press `n` to proceed to processing configuration
@@ -218,6 +219,8 @@ When prompted "Reorder images? (y/N):", press `y` to enter the interactive reord
 6. Press `Enter` when done
 
 Images will be uploaded with numeric prefixes (01_, 02_, 03_, etc.) to maintain the order you specified on S3.
+
+Preview rendering in the reorder interface is asynchronous to keep navigation responsive. When a preview is not cached, a short "[Loading preview...]" indicator appears while the render completes.
 - Output format defaults to JPEG
 - Use arrow keys to navigate between options
 - Press `Space` to toggle options on/off, or cycle through output formats (JPEG → PNG → WEBP)
@@ -274,6 +277,8 @@ The image selection uses a multi-step workflow to prevent accidental uploads:
   - When locked: Unlocks to allow changes
 - **n**: Proceed to next stage (only available when selections are locked)
 - **q** or **Esc**: Cancel and quit
+
+Preview rendering is asynchronous to keep navigation responsive. When a preview is not cached, a short "[Loading preview...]" indicator appears while the render completes.
 
 ### Stage 2: Processing Configuration Screen
 

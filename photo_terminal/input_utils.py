@@ -50,6 +50,17 @@ def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
     return None
 
 
+def read_key_with_timeout(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
+    """Read a key if available within timeout_sec.
+
+    Returns:
+        Same values as read_key(), or None if no input is ready.
+    """
+    if not _stdin_has_data(timeout_sec):
+        return None
+    return read_key(timeout_sec)
+
+
 def is_ghostty() -> bool:
     term_program = os.environ.get("TERM_PROGRAM", "")
     term = os.environ.get("TERM", "")

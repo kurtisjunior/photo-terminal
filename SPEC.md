@@ -13,7 +13,8 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 ### Included Features
 
 - Multi-stage workflow with selection locking (Stage 1: select, Stage 2: configure, Stage 3: browse)
-- Two-pane TUI with file list and viu preview for image selection
+- Two-pane TUI with file list (left) and viu preview (right) for image selection
+- Asynchronous preview rendering with loading indicator on cache misses
 - Processing configuration screen (resize, EXIF preservation, output format)
 - Output format selection (JPEG, PNG, WEBP) with format-specific optimization
 - Interactive S3 folder browser with hierarchy navigation (existing bucket structure)
@@ -65,6 +66,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 4. **Build two-pane TUI with file list (left) and viu preview (right)**
    - Core UX requirement - navigable list with checkboxes, live preview on right
+   - Preview rendering is asynchronous with a loading indicator on cache misses
    - Arrow keys navigate, spacebar toggles selection, enter confirms
 
 5. **Implement interactive S3 folder browser with hierarchy navigation**
@@ -106,7 +108,10 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 **Mitigation**: Check for viu availability on startup with clear error message and installation instructions. No fallback since visual preview is core requirement.
 
 ### Large high-resolution images may cause slow preview rendering
-**Mitigation**: viu handles scaling automatically. Add loading indicator while rendering preview. User can navigate away if render is slow.
+**Mitigation**: viu handles scaling automatically. Preview rendering is asynchronous with a loading indicator, so navigation remains responsive and the preview updates when ready.
+
+### Reorder interface preview lag
+**Mitigation**: Reorder previews use the same asynchronous rendering path with a loading indicator to keep navigation responsive.
 
 ### Temp directory fills up with large batch processing
 **Mitigation**: Use Python tempfile.TemporaryDirectory for automatic cleanup. Check available disk space before processing starts. Fail-fast if insufficient space.
@@ -159,7 +164,7 @@ Two-pane TUI with checkbox-style indicators and multi-stage workflow:
 1. Mark images with y/Space (shows [x])
 2. Lock selections with Enter (prevents accidental changes)
 3. Proceed with 'n' to processing configuration
-Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, enter locks, 'n' proceeds.
+Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, enter locks, 'n' proceeds. Preview rendering is asynchronous with a loading indicator on cache misses to keep navigation responsive.
 
 ### Error Handling
 Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, pre-validation before processing starts.

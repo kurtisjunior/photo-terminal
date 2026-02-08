@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional
 
@@ -24,6 +25,8 @@ from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -205,6 +208,81 @@ class ImageSelector:
         self._image_cache = {}  # Cache for rendered image output: {image_path: output}
         self._selections_locked = False  # Track if selections are locked
         self._locked_indices = set()  # Store locked selection indices
+        self._preview_executor = ThreadPoolExecutor(max_workers=2)
+        self._preview_futures = {}
+        self._preview_lock = threading.Lock()
+        self._preview_dirty = False
+        self._last_preview_key = None
+
+    def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, mode: str) -> None:
+        """Schedule preview rendering if not already cached or in flight."""
+        if cache_key in self._image_cache:
+            return
+        with self._preview_lock:
+            if cache_key in self._preview_futures:
+                return
+            future = self._preview_executor.submit(
+                self._render_preview_output,
+                image_path,
+                width,
+                height,
+                mode
+            )
+            self._preview_futures[cache_key] = future
+        future.add_done_callback(lambda f, key=cache_key: self._store_preview_result(key, f))
+
+    def _store_preview_result(self, cache_key: str, future) -> None:
+        """Store preview render result and mark UI dirty."""
+        try:
+            output = future.result()
+        except Exception as e:
+            if cache_key.startswith("graphics:"):
+                output = f"[Preview error: {e}]".encode('utf-8', errors='replace')
+            else:
+                output = [f"[Preview error: {e}]"]
+        with self._preview_lock:
+            self._preview_futures.pop(cache_key, None)
+            if output is not None:
+                if cache_key.startswith("graphics:") and isinstance(output, list):
+                    output = "\n".join(output).encode('utf-8', errors='replace')
+                if cache_key.startswith("blocks:") and isinstance(output, bytes):
+                    output = output.decode('utf-8', errors='replace').splitlines()
+                self._image_cache[cache_key] = output
+            self._preview_dirty = True
+
+    def _render_preview_output(self, image_path: Path, width: int, height: int, mode: str):
+        """Render preview output via viu (blocks or graphics)."""
+        if mode == "graphics":
+            result = subprocess.run(
+                ["viu", "-w", str(width), "-h", str(height), str(image_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout
+            error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+            return f"[Preview error: {error_msg}]".encode('utf-8', errors='replace')
+
+        result = subprocess.run(
+            ["viu", "-b", "-w", str(width), "-h", str(height), str(image_path)],
+            capture_output=True,
+            text=False,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.decode('utf-8', errors='replace').splitlines()
+        error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+        return [f"[Preview error: {error_msg}]"]
+
+    @staticmethod
+    def _loading_lines(width: int, height: int) -> List[str]:
+        """Create a placeholder preview to avoid blocking on render."""
+        if height <= 0:
+            return ["[Loading preview...]"]
+        lines = [" " * width for _ in range(height)]
+        lines[0] = "[Loading preview...]"
+        return lines
 
     def _preload_image(self, index: int) -> None:
         """Pre-load image at index into cache in background.
@@ -230,19 +308,7 @@ class ImageSelector:
             image_height = terminal_height - 2
 
             cache_key = f"graphics:{image_path}:{image_width}:{image_height}"
-            if cache_key not in self._image_cache:
-                try:
-                    result = subprocess.run(
-                        ["viu", "-w", str(image_width), "-h", str(image_height), str(image_path)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        timeout=5
-                    )
-                    if result.returncode == 0:
-                        self._image_cache[cache_key] = result.stdout
-                        logger.debug(f"Pre-loaded graphics output for {image_path.name}")
-                except Exception as e:
-                    logger.error(f"Pre-load failed for {image_path.name}: {e}")
+            self._schedule_preview(cache_key, image_path, image_width, image_height, "graphics")
         else:
             # Block mode dimensions
             file_list_width = 55
@@ -251,38 +317,17 @@ class ImageSelector:
             image_height = max(10, min(terminal_size.lines - 5, 35))
 
             cache_key = f"blocks:{image_path}:{image_width}:{image_height}"
-            if cache_key not in self._image_cache:
-                try:
-                    result = subprocess.run(
-                        ["viu", "-b", "-w", str(image_width), "-h", str(image_height), str(image_path)],
-                        capture_output=True,
-                        text=False,
-                        timeout=5
-                    )
-                    if result.returncode == 0:
-                        viu_lines = result.stdout.decode('utf-8', errors='replace').splitlines()
-                        self._image_cache[cache_key] = viu_lines
-                        logger.debug(f"Pre-loaded blocks output for {image_path.name}")
-                except Exception as e:
-                    logger.error(f"Pre-load failed for {image_path.name}: {e}")
+            self._schedule_preview(cache_key, image_path, image_width, image_height, "blocks")
 
     def _trigger_preload(self) -> None:
         """Pre-load adjacent images in background."""
         # Pre-load next image (N+1)
         if self.current_index + 1 < len(self.images):
-            threading.Thread(
-                target=self._preload_image,
-                args=(self.current_index + 1,),
-                daemon=True
-            ).start()
+            self._preload_image(self.current_index + 1)
 
         # Pre-load previous image (N-1)
         if self.current_index - 1 >= 0:
-            threading.Thread(
-                target=self._preload_image,
-                args=(self.current_index - 1,),
-                daemon=True
-            ).start()
+            self._preload_image(self.current_index - 1)
 
     def toggle_selection(self) -> None:
         """Toggle selection state of current image."""
@@ -426,24 +471,10 @@ class ImageSelector:
             viu_lines = self._image_cache[cache_key]
             logger.debug(f"Using cached blocks output for {current_image.name}")
         elif check_viu_availability():
-            try:
-                # Use blocks - this viu version (1.6.1) doesn't support graphics protocols
-                # Blocks are low-res by nature, but larger size helps
-                result = subprocess.run(
-                    ["viu", "-b", "-w", str(image_width), "-h", str(image_height), str(current_image)],
-                    capture_output=True,
-                    text=False,
-                    timeout=5
-                )
-
-                if result.returncode == 0:
-                    viu_lines = result.stdout.decode('utf-8', errors='replace').splitlines()
-                    # Cache the splitlines() output for instant replay
-                    self._image_cache[cache_key] = viu_lines
-                    logger.debug(f"Cached blocks output for {current_image.name} ({len(viu_lines)} lines)")
-            except Exception as e:
-                logger.error(f"viu preview failed: {e}")
-                viu_lines = [f"[Preview error: {e}]"]
+            # Schedule render in background to avoid blocking navigation
+            self._schedule_preview(cache_key, current_image, image_width, image_height, "blocks")
+            viu_lines = self._loading_lines(image_width, image_height)
+            logger.debug(f"Preview scheduled for {current_image.name}")
 
         # Get file list lines (rendered to max 55 chars wide to not overlap image)
         narrow_console = Console(width=55, force_terminal=True)
@@ -536,32 +567,10 @@ class ImageSelector:
             sys.stdout.flush()
             logger.debug(f"Using cached graphics output for {current_image.name}")
         else:
-            # Call viu and cache result
-            # CRITICAL: Capture output to cache, then write it
-            # This preserves the binary graphics protocol escape sequences
-            try:
-                result = subprocess.run(
-                    ["viu", "-w", str(image_width), "-h", str(image_height), str(current_image)],
-                    stdout=subprocess.PIPE,  # Capture for caching
-                    stderr=subprocess.PIPE,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    # Cache and display the output
-                    self._image_cache[cache_key] = result.stdout
-                    sys.stdout.buffer.write(result.stdout)
-                    sys.stdout.flush()
-                    logger.debug(f"Cached graphics output for {current_image.name} ({len(result.stdout)} bytes)")
-                else:
-                    error_msg = result.stderr.decode('utf-8', errors='replace').strip()
-                    sys.stdout.write(f"\n[Preview error: {error_msg}]\n")
-                    sys.stdout.flush()
-            except subprocess.TimeoutExpired:
-                sys.stdout.write("[Preview timed out]")
-                sys.stdout.flush()
-            except Exception as e:
-                sys.stdout.write(f"[Preview error: {e}]")
-                sys.stdout.flush()
+            # Schedule render in background to avoid blocking navigation
+            self._schedule_preview(cache_key, current_image, image_width, image_height, "graphics")
+            sys.stdout.write("[Loading preview...]")
+            sys.stdout.flush()
 
         # Pre-load adjacent images for faster navigation
         self._trigger_preload()
@@ -633,30 +642,31 @@ class ImageSelector:
             self.render_with_preview()
 
             while True:
-                # Read a single character
-                char = sys.stdin.read(1)
+                # Read key with a short timeout to allow background preview updates
+                key = read_key_with_timeout(0.05)
 
-                # Handle escape sequences (arrow keys)
-                if char == '\x1b':  # ESC
-                    next_char = sys.stdin.read(1)
-                    if next_char == '[':
-                        arrow = sys.stdin.read(1)
-                        if arrow == 'A':  # Up arrow
-                            logger.debug("Up arrow pressed")
-                            self.move_up()
-                        elif arrow == 'B':  # Down arrow
-                            logger.debug("Down arrow pressed")
-                            self.move_down()
-                    else:
-                        # Escape key pressed (without arrow)
-                        logger.info("Escape pressed, exiting")
-                        return None
+                if key is None:
+                    if self._preview_dirty:
+                        self._preview_dirty = False
+                        self.render_with_preview()
+                    continue
+
+                # Handle navigation keys
+                if key == KEY_UP:
+                    logger.debug("Up arrow pressed")
+                    self.move_up()
+                elif key == KEY_DOWN:
+                    logger.debug("Down arrow pressed")
+                    self.move_down()
+                elif key == KEY_ESC:
+                    logger.info("Escape pressed, exiting")
+                    return None
 
                 # Handle other keys
-                elif char == ' ':  # Spacebar
+                elif key == ' ':  # Spacebar
                     logger.debug("Space pressed")
                     self.toggle_selection()
-                elif char == '\r' or char == '\n':  # Enter
+                elif key == '\r' or key == '\n':  # Enter
                     logger.info("Enter pressed")
                     if not self._selections_locked:
                         # Lock the selections
@@ -673,17 +683,17 @@ class ImageSelector:
                         self._locked_indices = set()
                         logger.info("Selections unlocked")
                     # Don't return - stay in the loop
-                elif char == 'y' or char == 'Y':
+                elif key == 'y' or key == 'Y':
                     # Just mark the image, don't proceed
                     logger.info("'y' pressed - toggling selection")
                     self.toggle_selection()
-                elif char == 'n' or char == 'N':
+                elif key == 'n' or key == 'N':
                     if not self._selections_locked:
                         logger.info("'n' pressed but selections not locked - ignoring")
                         continue
                     logger.info("'n' pressed - proceeding to next stage")
                     return self.get_selected_images()
-                elif char == 'a' or char == 'A':
+                elif key == 'a' or key == 'A':
                     # Toggle select all
                     logger.info("'a' pressed - toggling select all")
                     if len(self.selected_indices) == len(self.images):
@@ -695,10 +705,10 @@ class ImageSelector:
                         self.selected_indices = set(range(len(self.images)))
                         logger.info(f"Selected all {len(self.images)} images")
                     # Don't return - let user confirm with Enter
-                elif char == 'q' or char == 'Q':  # Quit
+                elif key == 'q' or key == 'Q':  # Quit
                     logger.info("Q pressed, exiting")
                     return None
-                elif char == '\x03':  # Ctrl+C
+                elif key == '\x03':  # Ctrl+C
                     logger.info("Ctrl+C pressed")
                     raise KeyboardInterrupt
 
@@ -711,6 +721,10 @@ class ImageSelector:
             sys.stdout.write('\033[2J\033[H')  # Clear screen
             sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            try:
+                self._preview_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
 
 
 def show_processing_config(locked_images: List[Path], config: dict) -> dict:

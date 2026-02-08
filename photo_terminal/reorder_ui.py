@@ -10,9 +10,12 @@ import subprocess
 import sys
 import termios
 import tty
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from photo_terminal.reorder import ImageReorderer, generate_prefixed_filenames, get_final_filenames_preview
 from photo_terminal.tui import check_viu_availability, TerminalCapabilities
+from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout
 
 
 class ReorderImageSelector:
@@ -31,6 +34,55 @@ class ReorderImageSelector:
         self._image_cache = {}
         self._first_render = True
         self._protocol = TerminalCapabilities.detect_graphics_protocol()
+        self._preview_executor = ThreadPoolExecutor(max_workers=2)
+        self._preview_futures = {}
+        self._preview_lock = threading.Lock()
+        self._preview_dirty = False
+
+    def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, use_blocks: bool) -> None:
+        if cache_key in self._image_cache:
+            return
+        with self._preview_lock:
+            if cache_key in self._preview_futures:
+                return
+            future = self._preview_executor.submit(
+                self._render_preview_output,
+                image_path,
+                width,
+                height,
+                use_blocks
+            )
+            self._preview_futures[cache_key] = future
+        future.add_done_callback(lambda f, key=cache_key: self._store_preview_result(key, f))
+
+    def _store_preview_result(self, cache_key: str, future) -> None:
+        try:
+            output = future.result()
+        except Exception as e:
+            output = [f"[Preview error: {e}]"]
+        with self._preview_lock:
+            self._preview_futures.pop(cache_key, None)
+            if output is not None:
+                self._image_cache[cache_key] = output
+            self._preview_dirty = True
+
+    @staticmethod
+    def _render_preview_output(image_path: Path, width: int, height: int, use_blocks: bool):
+        if use_blocks:
+            cmd = ["viu", "-b", "-w", str(width), "-h", str(height), str(image_path)]
+        else:
+            cmd = ["viu", "-w", str(width), "-h", str(height), str(image_path)]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=False,
+            timeout=3
+        )
+        if result.returncode == 0:
+            return result.stdout.decode('utf-8', errors='replace').splitlines()
+        error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+        return [f"[Preview error: {error_msg}]"]
 
     def _get_preview_lines(self, image_path: Path, width: int, height: int) -> List[str]:
         """Get cached preview lines for an image (same as tui.py)."""
@@ -41,27 +93,8 @@ class ReorderImageSelector:
         if cache_key in self._image_cache:
             return self._image_cache[cache_key]
 
-        try:
-            # Use graphics protocol if available (better quality), otherwise use blocks
-            if use_blocks:
-                cmd = ["viu", "-b", "-w", str(width), "-h", str(height), str(image_path)]
-            else:
-                # Graphics protocol - no -b flag for high quality
-                cmd = ["viu", "-w", str(width), "-h", str(height), str(image_path)]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=False,
-                timeout=3
-            )
-            if result.returncode == 0:
-                lines = result.stdout.decode('utf-8', errors='replace').splitlines()
-                self._image_cache[cache_key] = lines
-                return lines
-        except Exception:
-            pass
-        return ["[Preview error]"]
+        self._schedule_preview(cache_key, image_path, width, height, use_blocks)
+        return ["[Loading preview...]"]
 
     def _create_file_list_lines(self) -> List[str]:
         """Create file list display lines."""
@@ -185,37 +218,36 @@ class ReorderImageSelector:
             self.render()
 
             while True:
-                # Read key
-                char = sys.stdin.read(1)
+                key = read_key_with_timeout(0.05)
 
-                # Handle escape sequences
-                if char == '\x1b':
-                    next_char = sys.stdin.read(1)
-                    if next_char == '[':
-                        arrow = sys.stdin.read(1)
-                        if arrow == 'A':  # Up
-                            self.reorderer.move_up()
-                        elif arrow == 'B':  # Down
-                            self.reorderer.move_down()
-                    else:
-                        # Lone ESC = cancel
-                        return None
+                if key is None:
+                    if self._preview_dirty:
+                        self._preview_dirty = False
+                        self.render()
+                    continue
+
+                if key == KEY_UP:
+                    self.reorderer.move_up()
+                elif key == KEY_DOWN:
+                    self.reorderer.move_down()
+                elif key == KEY_ESC:
+                    return None
 
                 # Handle regular keys
-                elif char in ('j', 'J'):
+                elif key in ('j', 'J'):
                     self.reorderer.move_down()
-                elif char in ('k', 'K'):
+                elif key in ('k', 'K'):
                     self.reorderer.move_up()
-                elif char == ' ':  # Space = grab/drop
+                elif key == ' ':  # Space = grab/drop
                     self.reorderer.toggle_grab()
-                elif char in ('r', 'R'):  # Reset
+                elif key in ('r', 'R'):  # Reset
                     self.reorderer.reset()
-                elif char in ('\r', '\n'):  # Enter = confirm
+                elif key in ('\r', '\n'):  # Enter = confirm
                     ordered_images = self.reorderer.get_ordered_images()
                     return generate_prefixed_filenames(ordered_images)
-                elif char in ('q', 'Q'):  # Quit
+                elif key in ('q', 'Q'):  # Quit
                     return None
-                elif char == '\x03':  # Ctrl+C
+                elif key == '\x03':  # Ctrl+C
                     raise KeyboardInterrupt
 
                 # Redraw
@@ -230,6 +262,10 @@ class ReorderImageSelector:
             sys.stdout.write('\033[2J\033[H')  # Clear screen
             sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            try:
+                self._preview_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
 
 
 def reorder_images_interactive(images: List[Path]) -> Optional[List[Tuple[Path, str]]]:
