@@ -164,7 +164,7 @@ The application follows this multi-stage workflow:
 
 ## Multi-Stage Workflow Example
 
-Here's a typical workflow when using the photo upload manager:
+A typical workflow when using the photo upload manager:
 
 ### 1. Start the application
 ```bash

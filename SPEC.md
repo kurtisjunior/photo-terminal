@@ -65,7 +65,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
    - Only show valid, processable images to user
 
 4. **Build two-pane TUI with file list (left) and viu preview (right)**
-   - Core UX requirement - navigable list with checkboxes, live preview on right
+   - Core UX requirement: navigable list with checkboxes, live preview on right
    - Preview rendering is asynchronous with a loading indicator on cache misses
    - Arrow keys navigate, spacebar toggles selection, enter confirms
 
@@ -92,7 +92,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 10. **Add S3 upload with minimal progress feedback (spinner + count)**
     - Use boto3 upload_file with spinner showing "⠋ Uploading... (12/15)"
-    - No retry logic - fail immediately on errors for fast feedback
+    - No retry logic. Fail immediately on errors for fast feedback.
 
 11. **Implement dry-run mode showing file list and size changes**
     - Display original → processed sizes for each selected image without uploading
@@ -151,13 +151,13 @@ Interactive folder browser for existing bucket structure. Navigate hierarchy (ja
 Basic fields only (camera, date taken, GPS). Leave date empty if missing from original. No fallback to file modification time.
 
 ### Dry-Run Support
-Yes - show selected files with original → processed size comparison. No actual upload or S3 operations performed.
+Enabled; shows selected files with original → processed size comparison. No actual upload or S3 operations performed.
 
 ### Logging Output
-Minimal - spinner with count during upload, completion summary with filenames. No verbose mode or debug logging.
+Minimal: spinner with count during upload, completion summary with filenames. No verbose mode or debug logging.
 
 ### CDN Integration
-None - tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
+None; the tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
 
 ### Selection UI
 Two-pane TUI with checkbox-style indicators and multi-stage workflow:
