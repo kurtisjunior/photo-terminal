@@ -213,6 +213,7 @@ class ImageSelector:
         self._preview_lock = threading.Lock()
         self._preview_dirty = False
         self._last_preview_key = None
+        self._last_preview_cached = False  # Whether last preview render was from cache
 
     def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, mode: str) -> None:
         """Schedule preview rendering if not already cached or in flight."""
@@ -282,6 +283,62 @@ class ImageSelector:
             return ["[Loading preview...]"]
         lines = [" " * width for _ in range(height)]
         lines[0] = "[Loading preview...]"
+        return lines
+
+    @staticmethod
+    def _visible_len(text: str) -> int:
+        """Calculate visible length of text excluding ANSI escape codes."""
+        return len(re.sub(r'\033\[[0-9;]*m', '', text))
+
+    @staticmethod
+    def _pad_line(text: str, width: int) -> str:
+        """Pad text with spaces to a fixed visible width."""
+        visible = len(re.sub(r'\033\[[0-9;]*m', '', text))
+        return text + ' ' * max(0, width - visible)
+
+    def _build_file_list_lines(self, width: int) -> List[str]:
+        """Build file list display lines with direct ANSI formatting.
+
+        Much faster than Rich Panel/Table/Console capture cycle.
+        """
+        lines = []
+        sel = len(self.selected_indices)
+        total = len(self.images)
+        header_text = f" Images ({sel}/{total} selected) "
+        border_w = max(0, width - len(header_text) - 2)
+        left_b = border_w // 2
+        right_b = border_w - left_b
+        lines.append(f"\033[34m{'─' * left_b}{header_text}{'─' * right_b}\033[0m")
+        lines.append("")
+
+        max_name = width - 8  # room for " [x] > " prefix
+        for i, img in enumerate(self.images):
+            checkbox = "[x]" if i in self.selected_indices else "[ ]"
+            name = img.name
+            if len(name) > max_name:
+                name = name[:max_name - 3] + "..."
+            if i == self.current_index:
+                lines.append(f" \033[1;36m{checkbox} \033[1;36m► {name}\033[0m")
+            else:
+                lines.append(f" {checkbox}   {name}")
+
+        lines.append("")
+        lines.append(f" \033[2m{'─' * (width - 2)}\033[0m")
+        cur_name = self.images[self.current_index].name
+        if len(cur_name) > width - 12:
+            cur_name = cur_name[:width - 15] + "..."
+        lines.append(f" \033[36mCurrent: {cur_name}\033[0m")
+        lines.append("")
+
+        if self._selections_locked:
+            lines.append(f" \033[1;32m✓ Selections locked\033[0m")
+            lines.append("")
+            lines.append(f" \033[2mn: Next Stage  Enter: Unlock  q/Esc: Cancel\033[0m")
+        else:
+            lines.append(f" \033[2m↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock\033[0m")
+            lines.append(f" \033[2mq/Esc: Cancel\033[0m")
+
+        lines.append("")
         return lines
 
     def _preload_image(self, index: int) -> None:
@@ -402,7 +459,7 @@ class ImageSelector:
         if self._selections_locked:
             controls_text.append("n: Next Stage  Enter: Unlock  q/Esc: Cancel", style="dim")
         else:
-            controls_text.append("↑/↓ Nav  y/Space: Mark [x]  a: All  Enter: Lock\n", style="dim")
+            controls_text.append("↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock\n", style="dim")
             controls_text.append("q/Esc: Cancel", style="dim")
 
         title = f"Images ({len(self.selected_indices)}/{len(self.images)} selected)"
@@ -423,156 +480,114 @@ class ImageSelector:
     def render_with_blocks(self, full_render: bool = True):
         """Render the TUI using block mode (Unicode blocks with ANSI colors).
 
-        This is the block-mode renderer that uses viu's -b flag to generate
-        colored Unicode characters (▄▀) for image preview. It uses a side-by-side
-        layout with the file list on the left and image preview on the right.
-
-        This works because block output is line-based text - each line of viu output
-        can be positioned independently using ANSI cursor positioning escape codes,
-        allowing the file list and image to be rendered side-by-side.
-
-        Args:
-            full_render: If True, performs a full screen clear and render.
-                        If False, performs partial update (currently unused but kept
-                        for future optimization to reduce flicker).
-
-        Layout:
-            - File list: Column 1-55 (left side)
-            - Image preview: Column 70+ (right side)
+        Uses direct ANSI line building for the file list (no Rich overhead)
+        and skips preview rewrite when the image hasn't changed.
         """
-        # Anti-flicker optimization: only clear screen on first render
+        # Anti-flicker: only clear screen on first render
         if self._first_render:
-            # First render: Clear entire screen
             sys.stdout.write('\033[2J\033[H')
             self._first_render = False
         else:
-            # Subsequent renders: Move cursor to home without clearing
             sys.stdout.write('\033[H')
         sys.stdout.flush()
 
-        # Get current image
         current_image = self.images[self.current_index]
-
-        # Calculate dimensions dynamically based on terminal size
         terminal_size = os.get_terminal_size()
-        file_list_column = 1   # Start file list at column 1 (left)
+        file_list_column = 1
         file_list_width = 55
-        image_column = file_list_width + 5  # Start image after file list with spacing
+        image_column = file_list_width + 5
         image_width = max(20, min(terminal_size.columns - image_column - 2, 60))
         image_height = max(10, min(terminal_size.lines - 5, 35))
 
-        # Get the image lines with blocks (viu 1.6.1 only supports blocks)
-        # Use cache to eliminate navigation delay
+        # Determine if preview needs updating
         cache_key = f"blocks:{current_image}:{image_width}:{image_height}"
-        viu_lines = []
+        cache_hit = cache_key in self._image_cache
+        preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
 
-        if cache_key in self._image_cache:
-            # Use cached output - instant!
-            viu_lines = self._image_cache[cache_key]
-            logger.debug(f"Using cached blocks output for {current_image.name}")
-        elif check_viu_availability():
-            # Schedule render in background to avoid blocking navigation
-            self._schedule_preview(cache_key, current_image, image_width, image_height, "blocks")
-            viu_lines = self._loading_lines(image_width, image_height)
-            logger.debug(f"Preview scheduled for {current_image.name}")
+        if preview_changed:
+            self._last_preview_key = cache_key
+            self._last_preview_cached = cache_hit
+            if cache_hit:
+                viu_lines = self._image_cache[cache_key]
+            elif check_viu_availability():
+                self._schedule_preview(cache_key, current_image, image_width, image_height, "blocks")
+                viu_lines = self._loading_lines(image_width, image_height)
+            else:
+                viu_lines = []
+        else:
+            viu_lines = None  # Skip preview rewrite
 
-        # Get file list lines (rendered to max 55 chars wide to not overlap image)
-        narrow_console = Console(width=55, force_terminal=True)
-        with narrow_console.capture() as capture:
-            narrow_console.print(self.create_file_list_panel())
-        file_list_lines = capture.get().splitlines()
+        # Build file list (fast direct ANSI, no Rich)
+        file_list_lines = self._build_file_list_lines(file_list_width)
 
-        # Render both side-by-side using cursor positioning
-        max_lines = max(len(file_list_lines), len(viu_lines))
+        # Write file list (always, padded to overwrite stale content)
+        for row, line in enumerate(file_list_lines):
+            sys.stdout.write(f'\033[{row + 1};{file_list_column}H')
+            sys.stdout.write(self._pad_line(line, file_list_width))
 
-        for row in range(max_lines):
-            # Position and print file list line on the left
-            if row < len(file_list_lines):
-                sys.stdout.write(f'\033[{row + 1};{file_list_column}H')
-                sys.stdout.write(file_list_lines[row])
-
-            # Position and print image line on the right
-            if row < len(viu_lines):
+        # Write preview (only when changed)
+        if viu_lines is not None:
+            for row in range(image_height):
                 sys.stdout.write(f'\033[{row + 1};{image_column}H')
-                sys.stdout.write(viu_lines[row])
+                if row < len(viu_lines):
+                    sys.stdout.write(viu_lines[row])
+                sys.stdout.write('\033[K')
 
         sys.stdout.flush()
-
-        # Pre-load adjacent images for faster navigation
         self._trigger_preload()
 
     def render_with_graphics_protocol(self):
         """Render TUI using graphics protocol for HD images.
 
-        Layout: Side-by-side (file list left, image right) - macOS Finder style
-
-        Rendering strategy to eliminate flickering:
-        - First render: Clear entire screen, render file list + image
-        - Subsequent renders: Move cursor to top, re-render file list in place,
-          then clear and update only the image area
-        - This approach updates the cursor/selection without full screen flash
+        Uses direct ANSI line building (no Rich overhead) and skips preview
+        rewrite when the image hasn't changed. No full-screen clear on
+        subsequent renders to eliminate flickering.
         """
-        # Calculate dimensions
         terminal_size = os.get_terminal_size()
         terminal_width = terminal_size.columns
         terminal_height = terminal_size.lines
-
-        # Side-by-side layout: file list on left, image on right
-        file_list_width = 55  # Fixed width for file list
-        image_column = 60     # Where image starts (column position)
-        image_width = terminal_width - image_column - 2  # Right side only
-        image_height = terminal_height - 2  # Full height
+        file_list_width = 55
+        image_column = 60
+        image_width = terminal_width - image_column - 2
+        image_height = terminal_height - 2
 
         if self._first_render:
-            # First render: Clear entire screen
             sys.stdout.write('\033[2J\033[H')
-            sys.stdout.flush()
             self._first_render = False
         else:
-            # Subsequent renders: Move cursor to home without clearing
             sys.stdout.write('\033[H')
-            sys.stdout.flush()
-
-        # Render file list at left (always, to show cursor changes)
-        narrow_console = Console(width=file_list_width, force_terminal=True)
-        with narrow_console.capture() as capture:
-            narrow_console.print(self.create_file_list_panel())
-        file_list_output = capture.get()
-        file_list_lines = file_list_output.splitlines()
-
-        # Clear screen (for refreshing both panes)
-        sys.stdout.write('\033[J')
-
-        # Write file list line-by-line on left side
-        for row, line in enumerate(file_list_lines, start=1):
-            sys.stdout.write(f'\033[{row};1H')  # Position at row, column 1
-            sys.stdout.write(line)
-
         sys.stdout.flush()
 
-        # Render new image with caching for instant navigation
+        # Build file list (fast direct ANSI, no Rich)
+        file_list_lines = self._build_file_list_lines(file_list_width)
+
+        # Write file list padded to fixed width (overwrites stale content)
+        for row, line in enumerate(file_list_lines):
+            sys.stdout.write(f'\033[{row + 1};1H')
+            sys.stdout.write(self._pad_line(line, file_list_width))
+        sys.stdout.flush()
+
+        # Determine if preview needs updating
         current_image = self.images[self.current_index]
-
-        # Cache key includes dimensions to handle terminal resizes
         cache_key = f"graphics:{current_image}:{image_width}:{image_height}"
+        cache_hit = cache_key in self._image_cache
+        preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
 
-        # Position cursor at top-right where image should render
-        sys.stdout.write(f'\033[1;{image_column}H')
-        sys.stdout.flush()
+        if preview_changed:
+            self._last_preview_key = cache_key
+            self._last_preview_cached = cache_hit
 
-        if cache_key in self._image_cache:
-            # Use cached output - INSTANT!
-            cached_output = self._image_cache[cache_key]
-            sys.stdout.buffer.write(cached_output)
-            sys.stdout.flush()
-            logger.debug(f"Using cached graphics output for {current_image.name}")
-        else:
-            # Schedule render in background to avoid blocking navigation
-            self._schedule_preview(cache_key, current_image, image_width, image_height, "graphics")
-            sys.stdout.write("[Loading preview...]")
+            sys.stdout.write(f'\033[1;{image_column}H')
             sys.stdout.flush()
 
-        # Pre-load adjacent images for faster navigation
+            if cache_hit:
+                sys.stdout.buffer.write(self._image_cache[cache_key])
+                sys.stdout.flush()
+            else:
+                self._schedule_preview(cache_key, current_image, image_width, image_height, "graphics")
+                sys.stdout.write("[Loading preview...]")
+                sys.stdout.flush()
+
         self._trigger_preload()
 
     def render_with_preview(self, full_render: bool = True):
@@ -683,9 +698,9 @@ class ImageSelector:
                         self._locked_indices = set()
                         logger.info("Selections unlocked")
                     # Don't return - stay in the loop
-                elif key == 'y' or key == 'Y':
+                elif key in ('y', 'Y', 'x', 'X'):
                     # Just mark the image, don't proceed
-                    logger.info("'y' pressed - toggling selection")
+                    logger.info(f"'{key}' pressed - toggling selection")
                     self.toggle_selection()
                 elif key == 'n' or key == 'N':
                     if not self._selections_locked:

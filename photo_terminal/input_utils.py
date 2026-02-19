@@ -15,6 +15,24 @@ KEY_ESC = "ESC"
 _DEFAULT_ESC_TIMEOUT = float(os.environ.get("PHOTO_TERMINAL_ESC_TIMEOUT", "0.10"))
 
 
+def _read_one_char() -> str:
+    """Read a single character from stdin.
+
+    Uses os.read() to bypass Python's buffered I/O, which is critical when
+    combined with select.select() for data availability checks. Both must
+    operate at the OS file descriptor level to avoid the bug where Python's
+    BufferedReader consumes multiple bytes (e.g. an entire arrow key escape
+    sequence) from the OS buffer on a single read(1) call, leaving
+    select.select() unable to see the remaining bytes.
+
+    Falls back to sys.stdin.read(1) when stdin is mocked (test mode).
+    """
+    if _is_mocked_reader():
+        return sys.stdin.read(1)
+    data = os.read(sys.stdin.fileno(), 1)
+    return data.decode("ascii", errors="replace")
+
+
 def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
     """Read a single key or decoded escape sequence.
 
@@ -24,7 +42,7 @@ def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
         - single-character string for regular keys
         - None for ignored/unknown escape sequences
     """
-    char = sys.stdin.read(1)
+    char = _read_one_char()
     if char != "\x1b":
         return char
 
@@ -71,7 +89,7 @@ def _stdin_has_data(timeout_sec: float) -> bool:
     if _is_mocked_reader():
         return True
     try:
-        ready, _, _ = select.select([sys.stdin], [], [], timeout_sec)
+        ready, _, _ = select.select([sys.stdin.fileno()], [], [], timeout_sec)
         return bool(ready)
     except Exception:
         return False
@@ -80,7 +98,7 @@ def _stdin_has_data(timeout_sec: float) -> bool:
 def _read_escape_sequence() -> str:
     seq = ""
     try:
-        seq += sys.stdin.read(1)
+        seq += _read_one_char()
     except Exception:
         return seq
 
@@ -88,14 +106,14 @@ def _read_escape_sequence() -> str:
         # Tests often mock sys.stdin.read with side_effects; just read next char.
         if seq in ("[", "O"):
             try:
-                seq += sys.stdin.read(1)
+                seq += _read_one_char()
             except Exception:
                 return seq
         return seq
 
     # Read any remaining bytes that are immediately available.
     while _stdin_has_data(0):
-        ch = sys.stdin.read(1)
+        ch = _read_one_char()
         seq += ch
         # CSI sequences typically end with @-~ range; stop early if reached.
         if "@" <= ch <= "~":
