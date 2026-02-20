@@ -26,7 +26,11 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout
+from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout, read_key_with_timeout_or_signal
+from photo_terminal.renderer import render_image_to_ansi
+
+# Pre-compiled regex for stripping ANSI escape codes (hot path optimisation)
+_ANSI_ESCAPE_RE = re.compile(r'\033\[[0-9;]*m')
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -208,12 +212,19 @@ class ImageSelector:
         self._image_cache = {}  # Cache for rendered image output: {image_path: output}
         self._selections_locked = False  # Track if selections are locked
         self._locked_indices = set()  # Store locked selection indices
-        self._preview_executor = ThreadPoolExecutor(max_workers=2)
+        self._preview_executor = ThreadPoolExecutor(max_workers=4)
         self._preview_futures = {}
         self._preview_lock = threading.Lock()
         self._preview_dirty = False
         self._last_preview_key = None
         self._last_preview_cached = False  # Whether last preview render was from cache
+        self._notify_r, self._notify_w = os.pipe()
+        os.set_blocking(self._notify_r, False)
+        self._protocol = TerminalCapabilities.detect_graphics_protocol()
+        try:
+            self._terminal_size = os.get_terminal_size()
+        except OSError:
+            self._terminal_size = os.terminal_size((120, 40))
 
     def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, mode: str) -> None:
         """Schedule preview rendering if not already cached or in flight."""
@@ -250,6 +261,10 @@ class ImageSelector:
                     output = output.decode('utf-8', errors='replace').splitlines()
                 self._image_cache[cache_key] = output
             self._preview_dirty = True
+            try:
+                os.write(self._notify_w, b'\x00')
+            except OSError:
+                pass
 
     def _render_preview_output(self, image_path: Path, width: int, height: int, mode: str):
         """Render preview output via viu (blocks or graphics)."""
@@ -265,16 +280,8 @@ class ImageSelector:
             error_msg = result.stderr.decode('utf-8', errors='replace').strip()
             return f"[Preview error: {error_msg}]".encode('utf-8', errors='replace')
 
-        result = subprocess.run(
-            ["viu", "-b", "-w", str(width), "-h", str(height), str(image_path)],
-            capture_output=True,
-            text=False,
-            timeout=5
-        )
-        if result.returncode == 0:
-            return result.stdout.decode('utf-8', errors='replace').splitlines()
-        error_msg = result.stderr.decode('utf-8', errors='replace').strip()
-        return [f"[Preview error: {error_msg}]"]
+        # Block mode: use in-process Pillow renderer (no subprocess overhead)
+        return render_image_to_ansi(image_path, width, height)
 
     @staticmethod
     def _loading_lines(width: int, height: int) -> List[str]:
@@ -288,12 +295,12 @@ class ImageSelector:
     @staticmethod
     def _visible_len(text: str) -> int:
         """Calculate visible length of text excluding ANSI escape codes."""
-        return len(re.sub(r'\033\[[0-9;]*m', '', text))
+        return len(_ANSI_ESCAPE_RE.sub('', text))
 
     @staticmethod
     def _pad_line(text: str, width: int) -> str:
         """Pad text with spaces to a fixed visible width."""
-        visible = len(re.sub(r'\033\[[0-9;]*m', '', text))
+        visible = len(_ANSI_ESCAPE_RE.sub('', text))
         return text + ' ' * max(0, width - visible)
 
     def _build_file_list_lines(self, width: int) -> List[str]:
@@ -351,10 +358,8 @@ class ImageSelector:
             return  # Out of bounds
 
         image_path = self.images[index]
-        protocol = TerminalCapabilities.detect_graphics_protocol()
-
-        # Calculate dimensions (same as render methods)
-        terminal_size = os.get_terminal_size()
+        protocol = self._protocol
+        terminal_size = self._terminal_size
 
         if protocol in ('iterm', 'kitty', 'ghostty', 'sixel'):
             # Graphics protocol dimensions
@@ -378,13 +383,11 @@ class ImageSelector:
 
     def _trigger_preload(self) -> None:
         """Pre-load adjacent images in background."""
-        # Pre-load next image (N+1)
-        if self.current_index + 1 < len(self.images):
-            self._preload_image(self.current_index + 1)
-
-        # Pre-load previous image (N-1)
-        if self.current_index - 1 >= 0:
-            self._preload_image(self.current_index - 1)
+        idx = self.current_index
+        for offset in (1, -1, 2, -2):
+            target = idx + offset
+            if 0 <= target < len(self.images):
+                self._preload_image(target)
 
     def toggle_selection(self) -> None:
         """Toggle selection state of current image."""
@@ -482,17 +485,22 @@ class ImageSelector:
 
         Uses direct ANSI line building for the file list (no Rich overhead)
         and skips preview rewrite when the image hasn't changed.
+
+        Double-buffered: all output is collected into a list and written
+        in a single sys.stdout.write() call to eliminate visual tearing.
         """
+        parts = []
+
         # Anti-flicker: only clear screen on first render
         if self._first_render:
-            sys.stdout.write('\033[2J\033[H')
+            parts.append('\033[2J\033[H')
             self._first_render = False
         else:
-            sys.stdout.write('\033[H')
-        sys.stdout.flush()
+            parts.append('\033[H')
 
         current_image = self.images[self.current_index]
-        terminal_size = os.get_terminal_size()
+        self._terminal_size = os.get_terminal_size()
+        terminal_size = self._terminal_size
         file_list_column = 1
         file_list_width = 55
         image_column = file_list_width + 5
@@ -522,17 +530,18 @@ class ImageSelector:
 
         # Write file list (always, padded to overwrite stale content)
         for row, line in enumerate(file_list_lines):
-            sys.stdout.write(f'\033[{row + 1};{file_list_column}H')
-            sys.stdout.write(self._pad_line(line, file_list_width))
+            parts.append(f'\033[{row + 1};{file_list_column}H')
+            parts.append(self._pad_line(line, file_list_width))
 
         # Write preview (only when changed)
         if viu_lines is not None:
             for row in range(image_height):
-                sys.stdout.write(f'\033[{row + 1};{image_column}H')
+                parts.append(f'\033[{row + 1};{image_column}H')
                 if row < len(viu_lines):
-                    sys.stdout.write(viu_lines[row])
-                sys.stdout.write('\033[K')
+                    parts.append(viu_lines[row])
+                parts.append('\033[K')
 
+        sys.stdout.write(''.join(parts))
         sys.stdout.flush()
         self._trigger_preload()
 
@@ -542,8 +551,16 @@ class ImageSelector:
         Uses direct ANSI line building (no Rich overhead) and skips preview
         rewrite when the image hasn't changed. No full-screen clear on
         subsequent renders to eliminate flickering.
+
+        Double-buffered: text output is collected into a list and written
+        in a single sys.stdout.write() call to eliminate visual tearing.
+        Binary preview data (graphics protocol) is written separately via
+        sys.stdout.buffer after flushing the text buffer.
         """
-        terminal_size = os.get_terminal_size()
+        parts = []
+
+        self._terminal_size = os.get_terminal_size()
+        terminal_size = self._terminal_size
         terminal_width = terminal_size.columns
         terminal_height = terminal_size.lines
         file_list_width = 55
@@ -552,20 +569,18 @@ class ImageSelector:
         image_height = terminal_height - 2
 
         if self._first_render:
-            sys.stdout.write('\033[2J\033[H')
+            parts.append('\033[2J\033[H')
             self._first_render = False
         else:
-            sys.stdout.write('\033[H')
-        sys.stdout.flush()
+            parts.append('\033[H')
 
         # Build file list (fast direct ANSI, no Rich)
         file_list_lines = self._build_file_list_lines(file_list_width)
 
         # Write file list padded to fixed width (overwrites stale content)
         for row, line in enumerate(file_list_lines):
-            sys.stdout.write(f'\033[{row + 1};1H')
-            sys.stdout.write(self._pad_line(line, file_list_width))
-        sys.stdout.flush()
+            parts.append(f'\033[{row + 1};1H')
+            parts.append(self._pad_line(line, file_list_width))
 
         # Determine if preview needs updating
         current_image = self.images[self.current_index]
@@ -573,20 +588,30 @@ class ImageSelector:
         cache_hit = cache_key in self._image_cache
         preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
 
+        # Binary preview data to write after flushing text buffer
+        binary_preview = None
+
         if preview_changed:
             self._last_preview_key = cache_key
             self._last_preview_cached = cache_hit
 
-            sys.stdout.write(f'\033[1;{image_column}H')
-            sys.stdout.flush()
+            parts.append(f'\033[1;{image_column}H')
 
             if cache_hit:
-                sys.stdout.buffer.write(self._image_cache[cache_key])
-                sys.stdout.flush()
+                # Binary data must be written separately after text flush
+                binary_preview = self._image_cache[cache_key]
             else:
                 self._schedule_preview(cache_key, current_image, image_width, image_height, "graphics")
-                sys.stdout.write("[Loading preview...]")
-                sys.stdout.flush()
+                parts.append("[Loading preview...]")
+
+        # Flush all text output in a single write
+        sys.stdout.write(''.join(parts))
+        sys.stdout.flush()
+
+        # Write binary preview data separately (can't join with strings)
+        if binary_preview is not None:
+            sys.stdout.buffer.write(binary_preview)
+            sys.stdout.flush()
 
         self._trigger_preload()
 
@@ -613,7 +638,7 @@ class ImageSelector:
                         Note: Graphics protocol path always does full render
                         regardless of this parameter.
         """
-        protocol = TerminalCapabilities.detect_graphics_protocol()
+        protocol = self._protocol
 
         if protocol in ('iterm', 'kitty', 'sixel'):
             # Graphics protocol path - always full render
@@ -653,15 +678,24 @@ class ImageSelector:
             sys.stdout.write('\033[?25l')
             sys.stdout.flush()
 
+            # Pre-load first few images on startup
+            for i in range(min(5, len(self.images))):
+                self._preload_image(i)
+
             # Initial render
             self.render_with_preview()
 
             while True:
-                # Read key with a short timeout to allow background preview updates
-                key = read_key_with_timeout(0.05)
+                # Read key with a short timeout; wakes immediately on preview completion
+                key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._notify_r])
 
                 if key is None:
                     if self._preview_dirty:
+                        # Drain notification pipe
+                        try:
+                            os.read(self._notify_r, 1024)
+                        except OSError:
+                            pass
                         self._preview_dirty = False
                         self.render_with_preview()
                     continue
@@ -739,6 +773,11 @@ class ImageSelector:
             try:
                 self._preview_executor.shutdown(wait=False, cancel_futures=True)
             except Exception:
+                pass
+            try:
+                os.close(self._notify_r)
+                os.close(self._notify_w)
+            except OSError:
                 pass
 
 

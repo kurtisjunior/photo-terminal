@@ -24,6 +24,8 @@ def folder_with_images(tmp_path):
     return tmp_path
 
 
+@patch('builtins.input', return_value='n')
+@patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
 @patch('photo_terminal.__main__.upload_images')
 @patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
@@ -31,7 +33,7 @@ def folder_with_images(tmp_path):
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='test/prefix/')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, folder_with_images, capsys):
+def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_show_config, mock_input, folder_with_images, capsys):
     """Test that CLI properly integrates with config module."""
     from photo_terminal.processor import ProcessedImage
     import tempfile
@@ -82,6 +84,8 @@ def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mo
     mock_temp_dir.cleanup()
 
 
+@patch('builtins.input', return_value='n')
+@patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
 @patch('photo_terminal.__main__.upload_images')
 @patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
@@ -89,7 +93,7 @@ def test_cli_integrates_with_config(mock_run, mock_viu_check, mock_browse_s3, mo
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='test/')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, folder_with_images, capsys):
+def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_show_config, mock_input, folder_with_images, capsys):
     """Test that CLI arguments override config file values."""
     from photo_terminal.processor import ProcessedImage
     import tempfile
@@ -140,17 +144,19 @@ def test_cli_overrides_config_values(mock_run, mock_viu_check, mock_browse_s3, m
     assert "400 KB" not in captured.out  # Original config value should not appear
 
     # Verify process_images was called with overridden target size
-    mock_process.assert_called_once_with([folder_with_images / 'test1.jpg'], 600)
+    mock_process.assert_called_once_with([folder_with_images / 'test1.jpg'], 600, 'JPEG', max_dimension=1920, filename_map=None)
 
     # Cleanup
     mock_temp_dir.cleanup()
 
 
+@patch('builtins.input', return_value='n')
+@patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='test/')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_dry_run_flag_integration(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, folder_with_images, capsys):
+def test_dry_run_flag_integration(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_show_config, mock_input, folder_with_images, capsys):
     """Test that dry-run flag is properly handled."""
     # Mock TUI to return selected images
     mock_run.return_value = [folder_with_images / 'test1.jpg']

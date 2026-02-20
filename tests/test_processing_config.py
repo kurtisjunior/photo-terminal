@@ -36,7 +36,7 @@ class TestShowProcessingConfig:
         mock_tcgetattr.return_value = []
 
         # Simulate user pressing Enter immediately (confirm defaults)
-        mock_stdin.read = MagicMock(side_effect=['\r'])
+        mock_stdin.read = MagicMock(side_effect=['y'])
         mock_stdin.fileno = MagicMock(return_value=0)
 
         locked_images = [Path("/tmp/img1.jpg"), Path("/tmp/img2.jpg")]
@@ -110,7 +110,7 @@ class TestShowProcessingConfig:
         mock_tcgetattr.return_value = []
 
         # Simulate user pressing Enter to confirm
-        mock_stdin.read = MagicMock(side_effect=['\r'])
+        mock_stdin.read = MagicMock(side_effect=['y'])
         mock_stdin.fileno = MagicMock(return_value=0)
 
         locked_images = [Path("/tmp/img1.jpg")]
@@ -133,7 +133,7 @@ class TestShowProcessingConfig:
         mock_tcgetattr.return_value = []
 
         # Simulate: Space (toggle resize), Enter (confirm)
-        mock_stdin.read = MagicMock(side_effect=[' ', '\r'])
+        mock_stdin.read = MagicMock(side_effect=[' ', 'y'])
         mock_stdin.fileno = MagicMock(return_value=0)
 
         locked_images = [Path("/tmp/img1.jpg")]

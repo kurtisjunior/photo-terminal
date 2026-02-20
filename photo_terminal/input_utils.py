@@ -79,6 +79,40 @@ def read_key_with_timeout(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional
     return read_key(timeout_sec)
 
 
+def read_key_with_timeout_or_signal(timeout_sec: float, extra_fds: list = None) -> Optional[str]:
+    """Read a key if available, or return None if timeout or signaled by extra_fds.
+
+    Args:
+        timeout_sec: Timeout in seconds
+        extra_fds: Additional file descriptors to monitor. If any become readable,
+                   returns None immediately (caller should check their signal source).
+
+    Returns:
+        Same values as read_key(), or None if no input / signal received.
+    """
+    fds_to_watch = [sys.stdin.fileno()] if not _is_mocked_reader() else []
+    if extra_fds:
+        fds_to_watch.extend(extra_fds)
+
+    if _is_mocked_reader():
+        return read_key(timeout_sec)
+
+    try:
+        ready, _, _ = select.select(fds_to_watch, [], [], timeout_sec)
+    except Exception:
+        return None
+
+    if not ready:
+        return None
+
+    # If only extra_fds are ready (not stdin), return None to let caller handle
+    stdin_fd = sys.stdin.fileno()
+    if stdin_fd not in ready:
+        return None
+
+    return read_key(timeout_sec)
+
+
 def is_ghostty() -> bool:
     term_program = os.environ.get("TERM_PROGRAM", "")
     term = os.environ.get("TERM", "")
