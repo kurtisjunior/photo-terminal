@@ -238,6 +238,25 @@ class TestCheckForDuplicates:
         assert mock_client.head_object.call_count == 2
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
+    def test_no_profile_uses_env(self, mock_session):
+        """Test that a None profile creates a profile-less session (env credentials)."""
+        mock_client = Mock()
+        mock_client.head_object.side_effect = ClientError(
+            {'Error': {'Code': '404'}}, 'HeadObject'
+        )
+        mock_session.return_value.client.return_value = mock_client
+
+        images = [Path('/tmp/img1.jpg'), Path('/tmp/img2.png')]
+
+        # Should not raise any exception
+        check_for_duplicates(images, 'bucket', 'japan/tokyo', None)
+
+        # Session created with no profile_name so boto3 resolves from environment
+        mock_session.assert_called_once_with()
+        mock_session.return_value.client.assert_called_once_with('s3')
+        assert mock_client.head_object.call_count == 2
+
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_single_duplicate_raises_error(self, mock_session):
         """Test that single duplicate raises DuplicateFilesError."""
         mock_client = Mock()
@@ -323,7 +342,7 @@ class TestCheckForDuplicates:
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_aws_session_init_failure(self, mock_session, capsys):
-        """Test AWS session initialization failure."""
+        """Test AWS session initialization failure with a profile set."""
         mock_session.side_effect = Exception('Invalid profile')
 
         images = [Path('/tmp/img.jpg')]
@@ -337,6 +356,24 @@ class TestCheckForDuplicates:
         assert "Error: Failed to initialize AWS session" in captured.out
         assert 'bad-profile' in captured.out
         assert 'aws configure' in captured.out
+
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
+    def test_aws_session_init_failure_no_profile(self, mock_session, capsys):
+        """Test AWS session initialization failure message guides to .env when no profile is set."""
+        mock_session.side_effect = Exception('Unable to locate credentials')
+
+        images = [Path('/tmp/img.jpg')]
+
+        with pytest.raises(SystemExit) as exc_info:
+            check_for_duplicates(images, 'bucket', 'prefix', None)
+
+        assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "Error: Failed to initialize AWS session" in captured.out
+        assert 'AWS_ACCESS_KEY_ID' in captured.out
+        assert 'AWS_SECRET_ACCESS_KEY' in captured.out
+        assert '.env' in captured.out
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_uses_sequential_check_for_small_batch(self, mock_session):

@@ -69,7 +69,7 @@ def print_effective_config(cfg, args, folder_path: Path) -> None:
     print(f"  Source folder:  {folder_path}")
     print(f"  S3 bucket:      {cfg.bucket}")
     print(f"  S3 prefix:      {args.prefix if args.prefix else '(root)'}")
-    print(f"  AWS profile:    {cfg.aws_profile}")
+    print(f"  AWS profile:    {cfg.aws_profile or '(env vars)'}")
     print(f"  Target size:    {cfg.target_size_kb} KB")
     print(f"  Dry-run mode:   {'Yes' if args.dry_run else 'No'}")
     print()

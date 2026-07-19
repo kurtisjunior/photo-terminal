@@ -108,6 +108,31 @@ def test_upload_images_success(sample_processed_images, mock_s3_client):
         ]
 
 
+def test_upload_images_no_profile_uses_env(sample_processed_images, mock_s3_client):
+    """Test that a None profile creates a profile-less session (env credentials)."""
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+        mock_session.return_value.client.return_value = mock_s3_client
+
+        uploaded_keys = upload_images(
+            processed_images=sample_processed_images,
+            bucket='test-bucket',
+            prefix='japan/tokyo',
+            aws_profile=None
+        )
+
+        # Session created with no profile_name so boto3 resolves from environment
+        mock_session.assert_called_once_with()
+        mock_session.return_value.client.assert_called_once_with('s3')
+
+        # Uploads still happen
+        assert mock_s3_client.upload_file.call_count == 3
+        assert uploaded_keys == [
+            'japan/tokyo/image_0.jpg',
+            'japan/tokyo/image_1.jpg',
+            'japan/tokyo/image_2.jpg'
+        ]
+
+
 def test_upload_images_empty_prefix(sample_processed_images, mock_s3_client):
     """Test upload with empty prefix."""
     with patch('photo_terminal.uploader.boto3.Session') as mock_session:
@@ -160,18 +185,44 @@ def test_upload_images_empty_list():
 
 
 def test_upload_images_aws_session_error(sample_processed_images):
-    """Test upload fails when AWS session creation fails."""
+    """Test upload fails when AWS session creation fails with a profile set."""
     with patch('photo_terminal.uploader.boto3.Session') as mock_session:
         # Simulate session creation error
         mock_session.side_effect = Exception("Invalid profile")
 
-        with pytest.raises(UploadError, match="Failed to create AWS session.*test-profile"):
+        with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket='test-bucket',
                 prefix='japan',
                 aws_profile='test-profile'
             )
+
+        error_msg = str(exc_info.value)
+        assert 'Failed to create AWS session' in error_msg
+        assert 'test-profile' in error_msg
+        assert 'aws configure --profile test-profile' in error_msg
+
+
+def test_upload_images_aws_session_error_no_profile(sample_processed_images):
+    """Test upload session error message guides to .env when no profile is set."""
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+        # Simulate session creation error (e.g. no credentials found)
+        mock_session.side_effect = Exception("Unable to locate credentials")
+
+        with pytest.raises(UploadError) as exc_info:
+            upload_images(
+                processed_images=sample_processed_images,
+                bucket='test-bucket',
+                prefix='japan',
+                aws_profile=None
+            )
+
+        error_msg = str(exc_info.value)
+        assert 'Failed to create AWS session' in error_msg
+        assert 'AWS_ACCESS_KEY_ID' in error_msg
+        assert 'AWS_SECRET_ACCESS_KEY' in error_msg
+        assert '.env' in error_msg
 
 
 def test_upload_images_client_error(sample_processed_images, mock_s3_client):

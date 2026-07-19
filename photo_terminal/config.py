@@ -16,11 +16,12 @@ class Config:
 
     Attributes:
         bucket: S3 bucket name for uploads
-        aws_profile: AWS CLI profile name to use
+        aws_profile: AWS CLI profile name to use, or None to let boto3 resolve
+            credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
         target_size_kb: Target file size in kilobytes for JPEG optimization
     """
 
-    def __init__(self, bucket: str, aws_profile: str, target_size_kb: int):
+    def __init__(self, bucket: str, aws_profile: Optional[str], target_size_kb: int):
         self.bucket = bucket
         self.aws_profile = aws_profile
         self.target_size_kb = target_size_kb
@@ -34,7 +35,7 @@ class Config:
 # Default configuration values
 DEFAULT_CONFIG = {
     'bucket': 'two-touch',
-    'aws_profile': 'kurtis-site',
+    'aws_profile': None,
     'target_size_kb': 400
 }
 
@@ -83,21 +84,25 @@ def load_config(config_path: Optional[Path] = None) -> Config:
     # Extract required fields with validation
     try:
         bucket = data['bucket']
-        aws_profile = data['aws_profile']
         target_size_kb = data['target_size_kb']
     except KeyError as e:
         print(f"Error: Missing required config field: {e}")
-        print(f"Required fields: bucket, aws_profile, target_size_kb")
+        print(f"Required fields: bucket, target_size_kb")
         raise SystemExit(1)
+
+    # aws_profile is optional; None (or absent) means boto3 resolves
+    # credentials from the environment (e.g. AWS_ACCESS_KEY_ID from .env)
+    aws_profile = data.get('aws_profile')
 
     # Validate field types
     if not isinstance(bucket, str) or not bucket:
         print(f"Error: 'bucket' must be a non-empty string")
         raise SystemExit(1)
 
-    if not isinstance(aws_profile, str) or not aws_profile:
-        print(f"Error: 'aws_profile' must be a non-empty string")
-        raise SystemExit(1)
+    if aws_profile is not None:
+        if not isinstance(aws_profile, str) or not aws_profile:
+            print(f"Error: 'aws_profile' must be a non-empty string if provided")
+            raise SystemExit(1)
 
     if not isinstance(target_size_kb, int) or target_size_kb <= 0:
         print(f"Error: 'target_size_kb' must be a positive integer")

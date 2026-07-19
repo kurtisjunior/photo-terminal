@@ -55,3 +55,11 @@ photo-uploader.yaml
 # Planwheel
 .planwheel/
 .claude/
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
+
+# AWS credentials / nix environment
+.env
+.aws/
+.direnv/

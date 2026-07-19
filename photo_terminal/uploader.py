@@ -7,7 +7,7 @@ on any upload error.
 
 import sys
 import time
-from typing import List
+from typing import List, Optional
 
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
@@ -28,7 +28,7 @@ def upload_images(
     processed_images: List[ProcessedImage],
     bucket: str,
     prefix: str,
-    aws_profile: str
+    aws_profile: Optional[str]
 ) -> List[str]:
     """Upload processed images to S3 with minimal progress feedback.
 
@@ -40,7 +40,8 @@ def upload_images(
         processed_images: List of ProcessedImage objects from processor
         bucket: S3 bucket name
         prefix: S3 key prefix (folder path)
-        aws_profile: AWS CLI profile name to use
+        aws_profile: AWS CLI profile name to use, or None to let boto3 resolve
+            credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
 
     Returns:
         List of S3 keys for successfully uploaded images
@@ -56,14 +57,18 @@ def upload_images(
     # Normalize prefix (handle empty string, trailing slashes)
     normalized_prefix = _normalize_prefix(prefix)
 
-    # Create boto3 S3 client with specified profile
+    # Create boto3 S3 client with specified profile (or from environment)
     try:
-        session = boto3.Session(profile_name=aws_profile)
+        session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
     except Exception as e:
-        raise UploadError(
-            f"Failed to create AWS session with profile '{aws_profile}': {e}"
-        ) from e
+        error_msg = f"Failed to create AWS session: {e}"
+        error_msg += (
+            f"\nTry: aws configure --profile {aws_profile}" if aws_profile
+            else "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
+                 "(see .env.example)"
+        )
+        raise UploadError(error_msg) from e
 
     # Upload each image with progress feedback
     uploaded_keys = []
