@@ -62,9 +62,13 @@ def upload_images(
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
     except Exception as e:
-        raise UploadError(
-            f"Failed to create AWS session with profile '{aws_profile}': {e}"
-        ) from e
+        error_msg = f"Failed to create AWS session: {e}"
+        error_msg += (
+            f"\nTry: aws configure --profile {aws_profile}" if aws_profile
+            else "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
+                 "(see .env.example)"
+        )
+        raise UploadError(error_msg) from e
 
     # Upload each image with progress feedback
     uploaded_keys = []

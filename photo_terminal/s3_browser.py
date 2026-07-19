@@ -56,7 +56,9 @@ def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
     except ProfileNotFound:
         raise S3AccessError(
             f"AWS profile '{aws_profile}' not found.\n\n"
-            f"Configure AWS CLI with:\n"
+            f"Recommended: create a .env file with AWS_ACCESS_KEY_ID and\n"
+            f"AWS_SECRET_ACCESS_KEY (see .env.example) instead of using a profile.\n\n"
+            f"Or configure AWS CLI with:\n"
             f"  aws configure --profile {aws_profile}\n\n"
             f"Or check your ~/.aws/credentials file."
         )
@@ -64,9 +66,12 @@ def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
     except NoCredentialsError:
         raise S3AccessError(
             "AWS credentials not found.\n\n"
-            "Configure AWS CLI with:\n"
-            "  aws configure\n\n"
-            "Or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+            "Recommended: create a .env file in the project root with:\n"
+            "  AWS_ACCESS_KEY_ID=...\n"
+            "  AWS_SECRET_ACCESS_KEY=...\n"
+            "(see .env.example; direnv loads it automatically).\n\n"
+            "Or configure AWS CLI with:\n"
+            "  aws configure --profile <profile-name>"
         )
 
     except ClientError as e:

@@ -22,7 +22,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 ### System Requirements
 
 - **Python 3.8+**
-- **AWS CLI** configured with credentials
+- **AWS credentials** — a `.env` file with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (recommended) or an AWS CLI profile
 - Terminal supporting 256+ colors
 
 ### Python Dependencies
@@ -49,15 +49,38 @@ Or install just the dependencies:
 pip install -r requirements.txt
 ```
 
-### 2. Configure AWS CLI
+### 2. Configure AWS Credentials
+
+The recommended way to provide AWS credentials is a `.env` file, which is automatically
+loaded by direnv (via `.envrc`'s `dotenv_if_exists .env`) when you enter the project
+directory — no AWS CLI or `~/.aws/` setup required.
 
 ```bash
-aws configure --profile kurtis-site
+cp .env.example .env
 ```
 
-Enter your AWS credentials when prompted. Make sure your profile has permissions for:
+Edit `.env` and fill in your credentials:
+
+```bash
+AWS_ACCESS_KEY_ID=your-access-key-id-here
+AWS_SECRET_ACCESS_KEY=your-secret-access-key-here
+```
+
+`.env` is gitignored, so your credentials are never committed. Make sure the IAM
+user/role behind these credentials has permissions for:
 - `s3:ListBucket` (to browse folders and check duplicates)
 - `s3:PutObject` (to upload images)
+
+**Alternative: AWS CLI profile.** If you'd rather use a named AWS CLI profile instead
+of environment variables, you can still do so:
+
+```bash
+aws configure --profile your-profile-name
+```
+
+Then set `aws_profile: your-profile-name` in `photo-uploader.yaml` (see below). Note
+that if `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are set in the environment (e.g.
+from `.env`), boto3 uses them regardless of any configured profile.
 
 
 ## Configuration
@@ -65,15 +88,17 @@ Enter your AWS credentials when prompted. Make sure your profile has permissions
 On first run, a configuration file will be created at `photo-uploader.yaml` with defaults:
 
 ```yaml
-bucket: some-bucket-name
-aws_profile: some-aws-profile
+bucket: two-touch
+aws_profile: null
 target_size_kb: 400
 ```
 
 ### Configuration Options
 
 - **bucket**: S3 bucket name for uploads
-- **aws_profile**: AWS CLI profile name to use
+- **aws_profile**: *(optional)* AWS CLI profile name to use. Leave unset/`null` to let
+  boto3 resolve credentials from the environment (`.env`) — this is the recommended
+  setup. Only set this if you're using a named AWS CLI profile as a fallback.
 - **target_size_kb**: Target file size in kilobytes for JPEG optimization
 
 All configuration values can be overridden via command-line arguments.
@@ -352,8 +377,9 @@ The application follows a fail-fast philosophy:
 
 **AWS credentials missing**:
 ```
-Error: Failed to initialize AWS session with profile 'kurtis-site'
-Make sure AWS CLI is configured with: aws configure --profile kurtis-site
+Error: Failed to initialize AWS session
+Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (see .env.example),
+or configure an AWS CLI profile with: aws configure --profile <profile-name>
 ```
 
 **Duplicate files in S3**:
@@ -487,10 +513,13 @@ This controls how long the system waits to distinguish between a lone ESC press 
 
 ### AWS permission errors
 
-**Check AWS configuration**:
+**Check your `.env` credentials**:
 ```bash
-aws s3 ls s3://two-touch/ --profile kurtis-site
+aws s3 ls s3://two-touch/
 ```
+
+If you're using an AWS CLI profile instead of `.env`, pass `--profile <profile-name>`
+to the command above.
 
 **Verify IAM permissions** for your AWS user:
 - `s3:ListBucket` on bucket
@@ -523,6 +552,8 @@ photo-terminal/
 ├── LICENSE                   # MIT License
 ├── pyproject.toml            # Package configuration
 ├── requirements.txt          # Python dependencies
+├── .env.example               # Template for AWS credentials (copy to .env)
+├── photo-uploader.yaml.example # Template for app configuration
 ├── photo_terminal/           # Source code package
 │   ├── __init__.py
 │   ├── __main__.py          # CLI entry point

@@ -58,3 +58,8 @@ photo-uploader.yaml
 
 # Riptide artifacts (cloud-synced)
 .humanlayer/tasks/
+
+# AWS credentials / nix environment
+.env
+.aws/
+.direnv/

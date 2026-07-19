@@ -4,8 +4,12 @@
 # S3 bucket name for uploads
 bucket: your-bucket-name
 
-# AWS CLI profile name to use
-aws_profile: your-aws-profile
+# Optional: AWS CLI profile name to use.
+# Leave this commented out (or omit it) to let boto3 resolve credentials from
+# the environment instead. Recommended: copy .env.example to .env and set
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY there - env vars take precedence
+# over this profile in boto3's credential chain.
+# aws_profile: your-aws-profile
 
 # Target file size in kilobytes for JPEG optimization
 target_size_kb: 400

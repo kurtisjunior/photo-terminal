@@ -72,9 +72,18 @@ def check_for_duplicates(
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
     except Exception as e:
-        print(f"Error: Failed to initialize AWS session with profile '{aws_profile}'")
-        print(f"Details: {e}")
-        print(f"\nMake sure AWS CLI is configured with: aws configure --profile {aws_profile}")
+        if aws_profile:
+            print(f"Error: Failed to initialize AWS session with profile '{aws_profile}'")
+            print(f"Details: {e}")
+            print(f"\nMake sure AWS CLI is configured with: aws configure --profile {aws_profile}")
+        else:
+            print("Error: Failed to initialize AWS session")
+            print(f"Details: {e}")
+            print(
+                "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
+                "(see .env.example), or configure an AWS CLI profile with: "
+                "aws configure --profile <profile-name>"
+            )
         raise SystemExit(1)
 
     # Normalize prefix (ensure no leading slash, add trailing slash if not empty)

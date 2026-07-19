@@ -342,7 +342,7 @@ class TestCheckForDuplicates:
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_aws_session_init_failure(self, mock_session, capsys):
-        """Test AWS session initialization failure."""
+        """Test AWS session initialization failure with a profile set."""
         mock_session.side_effect = Exception('Invalid profile')
 
         images = [Path('/tmp/img.jpg')]
@@ -356,6 +356,24 @@ class TestCheckForDuplicates:
         assert "Error: Failed to initialize AWS session" in captured.out
         assert 'bad-profile' in captured.out
         assert 'aws configure' in captured.out
+
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
+    def test_aws_session_init_failure_no_profile(self, mock_session, capsys):
+        """Test AWS session initialization failure message guides to .env when no profile is set."""
+        mock_session.side_effect = Exception('Unable to locate credentials')
+
+        images = [Path('/tmp/img.jpg')]
+
+        with pytest.raises(SystemExit) as exc_info:
+            check_for_duplicates(images, 'bucket', 'prefix', None)
+
+        assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "Error: Failed to initialize AWS session" in captured.out
+        assert 'AWS_ACCESS_KEY_ID' in captured.out
+        assert 'AWS_SECRET_ACCESS_KEY' in captured.out
+        assert '.env' in captured.out
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_uses_sequential_check_for_small_batch(self, mock_session):

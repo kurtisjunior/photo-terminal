@@ -68,9 +68,13 @@ def test_s3_access_profile_not_found(mock_session):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
-        assert 'profile' in str(exc_info.value).lower()
-        assert 'test-profile' in str(exc_info.value)
-        assert 'aws configure' in str(exc_info.value).lower()
+        error_msg = str(exc_info.value)
+        assert 'profile' in error_msg.lower()
+        assert 'test-profile' in error_msg
+        assert 'aws configure' in error_msg.lower()
+        # Guides users toward .env as the recommended alternative
+        assert '.env' in error_msg
+        assert 'AWS_ACCESS_KEY_ID' in error_msg
 
 
 def test_s3_access_no_credentials(mock_session, mock_s3_client):
@@ -81,8 +85,26 @@ def test_s3_access_no_credentials(mock_session, mock_s3_client):
         with pytest.raises(S3AccessError) as exc_info:
             validate_s3_access('test-bucket', 'test-profile')
 
-        assert 'credentials' in str(exc_info.value).lower()
-        assert 'aws configure' in str(exc_info.value).lower()
+        error_msg = str(exc_info.value)
+        assert 'credentials' in error_msg.lower()
+        assert 'aws configure' in error_msg.lower()
+        # .env is the recommended first step
+        assert '.env' in error_msg
+        assert 'AWS_ACCESS_KEY_ID' in error_msg
+
+
+def test_s3_access_no_credentials_no_profile(mock_session, mock_s3_client):
+    """Test error message when no profile is set and credentials are missing."""
+    mock_s3_client.list_objects_v2.side_effect = NoCredentialsError()
+
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session):
+        with pytest.raises(S3AccessError) as exc_info:
+            validate_s3_access('test-bucket', None)
+
+        error_msg = str(exc_info.value)
+        assert '.env' in error_msg
+        assert 'AWS_ACCESS_KEY_ID' in error_msg
+        assert 'AWS_SECRET_ACCESS_KEY' in error_msg
 
 
 def test_s3_access_bucket_not_found(mock_session, mock_s3_client):
