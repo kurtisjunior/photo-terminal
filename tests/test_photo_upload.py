@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from PIL import Image
 
+from photo_terminal.config import Config
 from photo_terminal.__main__ import validate_folder_path, main
 
 
@@ -21,6 +22,32 @@ def folder_with_images(tmp_path):
     img2.save(tmp_path / 'test2.png', 'PNG')
 
     return tmp_path
+
+
+@pytest.fixture
+def mock_config():
+    """Patch load_config with a deterministic, non-identifying Config.
+
+    Keeps these tests hermetic: the app reads config from a gitignored local
+    photo-uploader.yaml, so without this the assertions below would depend on
+    whatever bucket/profile/size a developer happens to have configured.
+    """
+    with patch('photo_terminal.__main__.load_config') as mock:
+        mock.return_value = Config(
+            bucket='test-bucket',
+            aws_profile='test-profile',
+            target_size_kb=200
+        )
+        yield mock
+
+
+@pytest.fixture
+def stub_upload_pipeline():
+    """Stub the S3-touching upload steps so workflow tests need no real AWS."""
+    with patch('photo_terminal.__main__.upload_images') as mock_upload, \
+         patch('photo_terminal.__main__.show_completion_summary') as mock_summary:
+        mock_upload.return_value = ['uploaded-key']
+        yield mock_upload, mock_summary
 
 
 def test_validate_folder_path_with_valid_directory(tmp_path):
@@ -54,7 +81,7 @@ def test_validate_folder_path_with_file(tmp_path):
 @patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_with_valid_folder(mock_run, mock_viu_check, mock_s3_access, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_with_valid_folder(mock_run, mock_viu_check, mock_s3_access, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys, mock_config, stub_upload_pipeline):
     """Test main function with valid folder."""
     # Mock TUI to return selected images
     mock_run.return_value = [folder_with_images / 'test1.jpg']
@@ -77,7 +104,7 @@ def test_main_with_valid_folder(mock_run, mock_viu_check, mock_s3_access, mock_c
     assert "test/folder" in captured.out
     assert "Found 2 valid image(s)" in captured.out
     assert "Selected 1 image(s)" in captured.out
-    assert "Upload target: s3://two-touch/test/folder/" in captured.out
+    assert "Upload target: s3://test-bucket/test/folder/" in captured.out
 
 
 def test_main_with_invalid_folder(capsys):
@@ -96,20 +123,43 @@ def test_main_with_invalid_folder(capsys):
 
 @patch('builtins.input', return_value='n')
 @patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
+@patch('photo_terminal.__main__.show_completion_summary')
+@patch('photo_terminal.__main__.upload_images', return_value=['test1.jpg'])
+@patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='')
+@patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_with_target_size_override(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_with_target_size_override(mock_run, mock_viu_check, mock_s3_access, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_summary, mock_show_config, mock_input, folder_with_images, capsys):
     """Test main function with target-size CLI override."""
+    from photo_terminal.processor import ProcessedImage
+
     # Mock TUI to return selected images
     mock_run.return_value = [folder_with_images / 'test1.jpg']
 
+    # Mock process_images to return temp_dir and processed images
+    mock_temp_dir = tempfile.TemporaryDirectory()
+    processed_images = [
+        ProcessedImage(
+            original_path=folder_with_images / 'test1.jpg',
+            temp_path=Path(mock_temp_dir.name) / 'test1.jpg',
+            original_size=5_000_000,
+            final_size=500_000,  # Matches 500 KB target size
+            quality_used=85,
+            warnings=[]
+        )
+    ]
+    mock_process.return_value = (mock_temp_dir, processed_images)
+
     test_args = ['photo_upload.py', str(folder_with_images), '--target-size', '500']
 
-    with patch.object(sys, 'argv', test_args):
-        result = main()
+    try:
+        with patch.object(sys, 'argv', test_args):
+            result = main()
+    finally:
+        mock_temp_dir.cleanup()
 
     assert result == 0
 
@@ -143,20 +193,44 @@ def test_main_with_dry_run(mock_run, mock_viu_check, mock_s3_access, mock_confir
 
 @patch('builtins.input', return_value='n')
 @patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
+@patch('photo_terminal.__main__.show_completion_summary')
+@patch('photo_terminal.__main__.upload_images', return_value=['test1.jpg'])
+@patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='')
+@patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_without_prefix(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_without_prefix(mock_run, mock_viu_check, mock_s3_access, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_summary, mock_show_config, mock_input, folder_with_images, capsys):
     """Test main function without prefix argument - should trigger interactive browser."""
+    from photo_terminal.processor import ProcessedImage
+    import tempfile
+
     # Mock TUI to return selected images
     mock_run.return_value = [folder_with_images / 'test1.jpg']
 
+    # Mock process_images to return temp_dir and processed images
+    mock_temp_dir = tempfile.TemporaryDirectory()
+    processed_images = [
+        ProcessedImage(
+            original_path=folder_with_images / 'test1.jpg',
+            temp_path=Path(mock_temp_dir.name) / 'test1.jpg',
+            original_size=5_000_000,
+            final_size=400_000,
+            quality_used=85,
+            warnings=[]
+        )
+    ]
+    mock_process.return_value = (mock_temp_dir, processed_images)
+
     test_args = ['photo_upload.py', str(folder_with_images)]
 
-    with patch.object(sys, 'argv', test_args):
-        result = main()
+    try:
+        with patch.object(sys, 'argv', test_args):
+            result = main()
+    finally:
+        mock_temp_dir.cleanup()
 
     assert result == 0
 
@@ -173,20 +247,43 @@ def test_main_without_prefix(mock_run, mock_viu_check, mock_browse_s3, mock_conf
 
 @patch('builtins.input', return_value='n')
 @patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
+@patch('photo_terminal.__main__.show_completion_summary')
+@patch('photo_terminal.__main__.upload_images', return_value=['japan/tokyo/test1.jpg'])
+@patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='japan/tokyo/')
+@patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_interactive_browser_selection(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_interactive_browser_selection(mock_run, mock_viu_check, mock_s3_access, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_summary, mock_show_config, mock_input, folder_with_images, capsys):
     """Test main function with interactive browser returning a selected folder."""
+    from photo_terminal.processor import ProcessedImage
+
     # Mock TUI to return selected images
     mock_run.return_value = [folder_with_images / 'test1.jpg']
 
+    # Mock process_images to return temp_dir and processed images
+    mock_temp_dir = tempfile.TemporaryDirectory()
+    processed_images = [
+        ProcessedImage(
+            original_path=folder_with_images / 'test1.jpg',
+            temp_path=Path(mock_temp_dir.name) / 'test1.jpg',
+            original_size=5_000_000,
+            final_size=400_000,
+            quality_used=85,
+            warnings=[]
+        )
+    ]
+    mock_process.return_value = (mock_temp_dir, processed_images)
+
     test_args = ['photo_upload.py', str(folder_with_images)]
 
-    with patch.object(sys, 'argv', test_args):
-        result = main()
+    try:
+        with patch.object(sys, 'argv', test_args):
+            result = main()
+    finally:
+        mock_temp_dir.cleanup()
 
     assert result == 0
 
@@ -233,21 +330,52 @@ def test_main_s3_browser_cancelled(mock_run, mock_viu_check, mock_browse_s3, moc
 
 @patch('builtins.input', return_value='n')
 @patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
+@patch('photo_terminal.__main__.show_completion_summary')
+@patch('photo_terminal.__main__.upload_images', return_value=['japan/tokyo/test1.jpg', 'japan/tokyo/test2.png'])
+@patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='japan/tokyo/')
+@patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_with_confirmation_accepted(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_with_confirmation_accepted(mock_run, mock_viu_check, mock_s3_access, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_summary, mock_show_config, mock_input, folder_with_images, capsys):
     """Test main function with user accepting confirmation."""
+    from photo_terminal.processor import ProcessedImage
+
     # Mock TUI to return selected images
     selected_imgs = [folder_with_images / 'test1.jpg', folder_with_images / 'test2.png']
     mock_run.return_value = selected_imgs
 
+    # Mock process_images to return temp_dir and processed images
+    mock_temp_dir = tempfile.TemporaryDirectory()
+    processed_images = [
+        ProcessedImage(
+            original_path=folder_with_images / 'test1.jpg',
+            temp_path=Path(mock_temp_dir.name) / 'test1.jpg',
+            original_size=5_000_000,
+            final_size=400_000,
+            quality_used=85,
+            warnings=[]
+        ),
+        ProcessedImage(
+            original_path=folder_with_images / 'test2.png',
+            temp_path=Path(mock_temp_dir.name) / 'test2.png',
+            original_size=3_000_000,
+            final_size=400_000,
+            quality_used=75,
+            warnings=[]
+        )
+    ]
+    mock_process.return_value = (mock_temp_dir, processed_images)
+
     test_args = ['photo_upload.py', str(folder_with_images)]
 
-    with patch.object(sys, 'argv', test_args):
-        result = main()
+    try:
+        with patch.object(sys, 'argv', test_args):
+            result = main()
+    finally:
+        mock_temp_dir.cleanup()
 
     assert result == 0
 
@@ -279,21 +407,44 @@ def test_main_with_confirmation_rejected(mock_run, mock_viu_check, mock_browse_s
 
 @patch('builtins.input', return_value='n')
 @patch('photo_terminal.__main__.show_processing_config', return_value={'resize': False, 'target_size_kb': 400, 'preserve_exif': True, 'output_format': 'JPEG'})
+@patch('photo_terminal.__main__.show_completion_summary')
+@patch('photo_terminal.__main__.upload_images', return_value=['test1.jpg'])
+@patch('photo_terminal.__main__.process_images')
 @patch('photo_terminal.__main__.check_for_duplicates')
 @patch('photo_terminal.__main__.confirm_upload', return_value=True)
 @patch('photo_terminal.__main__.browse_s3_folders', return_value='')
+@patch('photo_terminal.s3_browser.validate_s3_access')
 @patch('photo_terminal.tui.check_viu_availability', return_value=True)
 @patch('photo_terminal.tui.ImageSelector.run')
-def test_main_with_confirmation_root_prefix(mock_run, mock_viu_check, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_show_config, mock_input, folder_with_images, capsys):
+def test_main_with_confirmation_root_prefix(mock_run, mock_viu_check, mock_s3_access, mock_browse_s3, mock_confirm, mock_check_duplicates, mock_process, mock_upload, mock_summary, mock_show_config, mock_input, folder_with_images, capsys):
     """Test main function with confirmation for root prefix upload."""
+    from photo_terminal.processor import ProcessedImage
+
     # Mock TUI to return selected images
     selected_imgs = [folder_with_images / 'test1.jpg']
     mock_run.return_value = selected_imgs
 
+    # Mock process_images to return temp_dir and processed images
+    mock_temp_dir = tempfile.TemporaryDirectory()
+    processed_images = [
+        ProcessedImage(
+            original_path=folder_with_images / 'test1.jpg',
+            temp_path=Path(mock_temp_dir.name) / 'test1.jpg',
+            original_size=5_000_000,
+            final_size=400_000,
+            quality_used=85,
+            warnings=[]
+        )
+    ]
+    mock_process.return_value = (mock_temp_dir, processed_images)
+
     test_args = ['photo_upload.py', str(folder_with_images)]
 
-    with patch.object(sys, 'argv', test_args):
-        result = main()
+    try:
+        with patch.object(sys, 'argv', test_args):
+            result = main()
+    finally:
+        mock_temp_dir.cleanup()
 
     assert result == 0
 
@@ -331,8 +482,8 @@ def test_main_calls_dry_run_when_flag_set(mock_run, mock_viu_check, mock_s3_acce
         selected_imgs,
         'two-touch',  # bucket from config
         'test/folder/',  # prefix from args (with trailing slash added by browse_s3_folders)
-        200,  # default target_size_kb from config (photo-uploader.yaml)
-        'kurtis-site',  # aws_profile from config
+        400,  # default target_size_kb from config
+        None,  # aws_profile is now optional (env vars used by default)
         'JPEG'  # output_format from processing config
     )
 
@@ -506,14 +657,14 @@ def test_full_workflow_success(
         selected_imgs,
         'two-touch',
         'test/',
-        'kurtis-site'
+        None
     )
-    mock_process.assert_called_once_with(selected_imgs, 200, 'JPEG', max_dimension=1920, filename_map=None)
+    mock_process.assert_called_once_with(selected_imgs, 400, 'JPEG', max_dimension=1920, filename_map=None)
     mock_upload.assert_called_once_with(
         processed_images,
         'two-touch',
         'test/',
-        'kurtis-site'
+        None
     )
     mock_summary.assert_called_once_with(
         processed_images,
@@ -796,13 +947,13 @@ def test_workflow_with_root_prefix(
         selected_imgs,
         'two-touch',
         '',
-        'kurtis-site'
+        None
     )
     mock_upload.assert_called_once_with(
         processed_images,
         'two-touch',
         '',
-        'kurtis-site'
+        None
     )
     mock_summary.assert_called_once_with(
         processed_images,

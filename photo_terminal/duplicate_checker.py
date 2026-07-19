@@ -5,7 +5,7 @@ Uses boto3 HeadObject for fail-fast duplicate detection.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
@@ -43,7 +43,7 @@ def check_for_duplicates(
     images: List[Path],
     bucket: str,
     prefix: str,
-    aws_profile: str
+    aws_profile: Optional[str]
 ) -> None:
     """Check if any image filenames already exist in S3 target prefix.
 
@@ -54,7 +54,8 @@ def check_for_duplicates(
         images: List of image paths to check
         bucket: S3 bucket name
         prefix: S3 prefix (folder path). Empty string for bucket root.
-        aws_profile: AWS CLI profile name to use
+        aws_profile: AWS CLI profile name to use, or None to let boto3 resolve
+            credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
 
     Returns:
         None if no duplicates found (all clear to proceed)
@@ -66,9 +67,9 @@ def check_for_duplicates(
     if not images:
         return
 
-    # Initialize S3 client with profile
+    # Initialize S3 client with profile (or from environment)
     try:
-        session = boto3.Session(profile_name=aws_profile)
+        session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
     except Exception as e:
         print(f"Error: Failed to initialize AWS session with profile '{aws_profile}'")

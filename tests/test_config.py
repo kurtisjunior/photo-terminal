@@ -30,7 +30,7 @@ def test_default_config_creation():
 
         # Verify defaults
         assert cfg.bucket == 'two-touch'
-        assert cfg.aws_profile == 'kurtis-site'
+        assert cfg.aws_profile is None
         assert cfg.target_size_kb == 400
         print("✓ All defaults correct")
 
@@ -139,6 +139,52 @@ def test_custom_values():
     print()
 
 
+def test_omitted_aws_profile():
+    """Test that omitting aws_profile loads successfully with None."""
+    print("Test 6: Omitted aws_profile defaults to None")
+    print("-" * 50)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        temp_path = Path(f.name)
+        f.write("bucket: two-touch\n")
+        f.write("target_size_kb: 400\n")
+        # aws_profile intentionally omitted
+
+    try:
+        cfg = config.load_config(temp_path)
+        assert cfg.bucket == 'two-touch'
+        assert cfg.aws_profile is None
+        assert cfg.target_size_kb == 400
+        print("✓ Omitted aws_profile loaded as None")
+    finally:
+        temp_path.unlink()
+
+    print()
+
+
+def test_empty_aws_profile():
+    """Test that an empty-string aws_profile raises SystemExit."""
+    print("Test 7: Empty aws_profile raises SystemExit")
+    print("-" * 50)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        temp_path = Path(f.name)
+        f.write("bucket: two-touch\n")
+        f.write("aws_profile: ''\n")  # Empty string - invalid if provided
+        f.write("target_size_kb: 400\n")
+
+    try:
+        cfg = config.load_config(temp_path)
+        print("✗ Should have raised SystemExit")
+        assert False, "Empty aws_profile should raise SystemExit"
+    except SystemExit:
+        print("✓ Empty aws_profile caught with clear error message")
+    finally:
+        temp_path.unlink()
+
+    print()
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("Config Module Test Suite")
@@ -151,6 +197,8 @@ if __name__ == '__main__':
         test_missing_field()
         test_invalid_value()
         test_custom_values()
+        test_omitted_aws_profile()
+        test_empty_aws_profile()
 
         print("=" * 50)
         print("All tests passed!")

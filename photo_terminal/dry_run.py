@@ -7,7 +7,7 @@ displaying information.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import sys
 
 from photo_terminal.processor import process_images, ProcessedImage
@@ -19,7 +19,7 @@ def dry_run_upload(
     bucket: str,
     prefix: str,
     target_size_kb: int,
-    aws_profile: str,
+    aws_profile: Optional[str],
     output_format: str = 'JPEG'
 ) -> None:
     """Show what would be uploaded without actually uploading.

@@ -108,6 +108,31 @@ def test_upload_images_success(sample_processed_images, mock_s3_client):
         ]
 
 
+def test_upload_images_no_profile_uses_env(sample_processed_images, mock_s3_client):
+    """Test that a None profile creates a profile-less session (env credentials)."""
+    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+        mock_session.return_value.client.return_value = mock_s3_client
+
+        uploaded_keys = upload_images(
+            processed_images=sample_processed_images,
+            bucket='test-bucket',
+            prefix='japan/tokyo',
+            aws_profile=None
+        )
+
+        # Session created with no profile_name so boto3 resolves from environment
+        mock_session.assert_called_once_with()
+        mock_session.return_value.client.assert_called_once_with('s3')
+
+        # Uploads still happen
+        assert mock_s3_client.upload_file.call_count == 3
+        assert uploaded_keys == [
+            'japan/tokyo/image_0.jpg',
+            'japan/tokyo/image_1.jpg',
+            'japan/tokyo/image_2.jpg'
+        ]
+
+
 def test_upload_images_empty_prefix(sample_processed_images, mock_s3_client):
     """Test upload with empty prefix."""
     with patch('photo_terminal.uploader.boto3.Session') as mock_session:

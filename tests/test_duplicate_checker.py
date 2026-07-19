@@ -238,6 +238,25 @@ class TestCheckForDuplicates:
         assert mock_client.head_object.call_count == 2
 
     @patch('photo_terminal.duplicate_checker.boto3.Session')
+    def test_no_profile_uses_env(self, mock_session):
+        """Test that a None profile creates a profile-less session (env credentials)."""
+        mock_client = Mock()
+        mock_client.head_object.side_effect = ClientError(
+            {'Error': {'Code': '404'}}, 'HeadObject'
+        )
+        mock_session.return_value.client.return_value = mock_client
+
+        images = [Path('/tmp/img1.jpg'), Path('/tmp/img2.png')]
+
+        # Should not raise any exception
+        check_for_duplicates(images, 'bucket', 'japan/tokyo', None)
+
+        # Session created with no profile_name so boto3 resolves from environment
+        mock_session.assert_called_once_with()
+        mock_session.return_value.client.assert_called_once_with('s3')
+        assert mock_client.head_object.call_count == 2
+
+    @patch('photo_terminal.duplicate_checker.boto3.Session')
     def test_single_duplicate_raises_error(self, mock_session):
         """Test that single duplicate raises DuplicateFilesError."""
         mock_client = Mock()

@@ -50,6 +50,18 @@ def test_s3_access_success(mock_session, mock_s3_client):
     )
 
 
+def test_s3_access_no_profile_uses_env(mock_session, mock_s3_client):
+    """Test that a None profile creates a profile-less session (env credentials)."""
+    mock_s3_client.list_objects_v2.return_value = {'Contents': []}
+
+    with patch('photo_terminal.s3_browser.boto3.Session', return_value=mock_session) as mock_session_ctor:
+        validate_s3_access('test-bucket', None)
+
+    # Session created with no profile_name so boto3 resolves from environment
+    mock_session_ctor.assert_called_once_with()
+    mock_session.client.assert_called_once_with('s3')
+
+
 def test_s3_access_profile_not_found(mock_session):
     """Test error when AWS profile not found."""
     with patch('photo_terminal.s3_browser.boto3.Session', side_effect=ProfileNotFound(profile='test-profile')):

@@ -35,18 +35,19 @@ class S3AccessError(Exception):
     pass
 
 
-def validate_s3_access(bucket: str, aws_profile: str) -> None:
+def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
     """Validate S3 access early to fail-fast on credential/permission issues.
 
     Args:
         bucket: S3 bucket name
-        aws_profile: AWS profile name
+        aws_profile: AWS profile name, or None to let boto3 resolve credentials
+            from the environment (e.g. AWS_ACCESS_KEY_ID)
 
     Raises:
         S3AccessError: If S3 access fails with detailed error message
     """
     try:
-        session = boto3.Session(profile_name=aws_profile)
+        session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
 
         # Test ListBucket permission with minimal request
@@ -113,12 +114,13 @@ def validate_s3_access(bucket: str, aws_profile: str) -> None:
         )
 
 
-def list_s3_folders(bucket: str, aws_profile: str, prefix: str = "") -> List[str]:
+def list_s3_folders(bucket: str, aws_profile: Optional[str], prefix: str = "") -> List[str]:
     """List folders (CommonPrefixes) at a given S3 prefix level.
 
     Args:
         bucket: S3 bucket name
-        aws_profile: AWS profile name
+        aws_profile: AWS profile name, or None to let boto3 resolve credentials
+            from the environment (e.g. AWS_ACCESS_KEY_ID)
         prefix: S3 prefix to list (e.g., "japan/" or "")
 
     Returns:
@@ -128,7 +130,7 @@ def list_s3_folders(bucket: str, aws_profile: str, prefix: str = "") -> List[str
         S3AccessError: If S3 access fails
     """
     try:
-        session = boto3.Session(profile_name=aws_profile)
+        session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
         s3_client = session.client('s3')
 
         # Use delimiter='/' to get folder-like structure
@@ -157,12 +159,13 @@ def list_s3_folders(bucket: str, aws_profile: str, prefix: str = "") -> List[str
 class S3FolderBrowser:
     """Interactive S3 folder browser with hierarchy navigation."""
 
-    def __init__(self, bucket: str, aws_profile: str):
+    def __init__(self, bucket: str, aws_profile: Optional[str]):
         """Initialize S3 folder browser.
 
         Args:
             bucket: S3 bucket name
-            aws_profile: AWS profile name
+            aws_profile: AWS profile name, or None to let boto3 resolve
+                credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
         """
         self.bucket = bucket
         self.aws_profile = aws_profile
@@ -356,7 +359,7 @@ class S3FolderBrowser:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
-def browse_s3_folders(bucket: str, aws_profile: str, initial_prefix: Optional[str] = None) -> str:
+def browse_s3_folders(bucket: str, aws_profile: Optional[str], initial_prefix: Optional[str] = None) -> str:
     """Browse S3 folders and select upload target.
 
     If initial_prefix is provided, skip browser and return it directly.
@@ -364,7 +367,8 @@ def browse_s3_folders(bucket: str, aws_profile: str, initial_prefix: Optional[st
 
     Args:
         bucket: S3 bucket name
-        aws_profile: AWS profile name
+        aws_profile: AWS profile name, or None to let boto3 resolve credentials
+            from the environment (e.g. AWS_ACCESS_KEY_ID)
         initial_prefix: Optional prefix from CLI args (skip browser if provided)
 
     Returns:
