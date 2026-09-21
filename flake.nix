@@ -16,6 +16,7 @@
           buildInputs = with pkgs; [
             python312
             uv
+            awscli2
           ];
         };
       }
