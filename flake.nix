@@ -17,6 +17,7 @@
             python312
             uv
             awscli2
+            viu
           ];
         };
       }
