@@ -1,25 +1,23 @@
 """Tests for S3 uploader module."""
 
-import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
-import io
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-from botocore.exceptions import ClientError, BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
 
-from photo_terminal.uploader import (
-    upload_images,
-    UploadError,
-    _normalize_prefix,
-    _construct_s3_key,
-    _show_progress,
-    _clear_progress
-)
 from photo_terminal.processor import ProcessedImage
-
+from photo_terminal.uploader import (
+    UploadError,
+    _clear_progress,
+    _construct_s3_key,
+    _normalize_prefix,
+    _show_progress,
+    upload_images,
+)
 
 # Test fixtures
+
 
 @pytest.fixture
 def sample_processed_images(tmp_path):
@@ -40,7 +38,7 @@ def sample_processed_images(tmp_path):
             original_size=500000,
             final_size=400000,
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
         images.append(processed)
 
@@ -57,25 +55,26 @@ def mock_s3_client():
 
 # Tests for upload_images()
 
+
 def test_upload_images_success(sample_processed_images, mock_s3_client):
     """Test successful upload of multiple images."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         # Setup mock session and client
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Upload images
         uploaded_keys = upload_images(
             processed_images=sample_processed_images,
-            bucket='test-bucket',
-            prefix='japan/tokyo',
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="japan/tokyo",
+            aws_profile="test-profile",
         )
 
         # Verify session created with correct profile
-        mock_session.assert_called_once_with(profile_name='test-profile')
+        mock_session.assert_called_once_with(profile_name="test-profile")
 
         # Verify S3 client created
-        mock_session.return_value.client.assert_called_once_with('s3')
+        mock_session.return_value.client.assert_called_once_with("s3")
 
         # Verify upload_file called for each image
         assert mock_s3_client.upload_file.call_count == 3
@@ -84,92 +83,88 @@ def test_upload_images_success(sample_processed_images, mock_s3_client):
         expected_calls = [
             call(
                 Filename=str(sample_processed_images[0].temp_path),
-                Bucket='test-bucket',
-                Key='japan/tokyo/image_0.jpg'
+                Bucket="test-bucket",
+                Key="japan/tokyo/image_0.jpg",
             ),
             call(
                 Filename=str(sample_processed_images[1].temp_path),
-                Bucket='test-bucket',
-                Key='japan/tokyo/image_1.jpg'
+                Bucket="test-bucket",
+                Key="japan/tokyo/image_1.jpg",
             ),
             call(
                 Filename=str(sample_processed_images[2].temp_path),
-                Bucket='test-bucket',
-                Key='japan/tokyo/image_2.jpg'
-            )
+                Bucket="test-bucket",
+                Key="japan/tokyo/image_2.jpg",
+            ),
         ]
         mock_s3_client.upload_file.assert_has_calls(expected_calls)
 
         # Verify returned keys
         assert uploaded_keys == [
-            'japan/tokyo/image_0.jpg',
-            'japan/tokyo/image_1.jpg',
-            'japan/tokyo/image_2.jpg'
+            "japan/tokyo/image_0.jpg",
+            "japan/tokyo/image_1.jpg",
+            "japan/tokyo/image_2.jpg",
         ]
 
 
 def test_upload_images_no_profile_uses_env(sample_processed_images, mock_s3_client):
     """Test that a None profile creates a profile-less session (env credentials)."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
             processed_images=sample_processed_images,
-            bucket='test-bucket',
-            prefix='japan/tokyo',
-            aws_profile=None
+            bucket="test-bucket",
+            prefix="japan/tokyo",
+            aws_profile=None,
         )
 
         # Session created with no profile_name so boto3 resolves from environment
         mock_session.assert_called_once_with()
-        mock_session.return_value.client.assert_called_once_with('s3')
+        mock_session.return_value.client.assert_called_once_with("s3")
 
         # Uploads still happen
         assert mock_s3_client.upload_file.call_count == 3
         assert uploaded_keys == [
-            'japan/tokyo/image_0.jpg',
-            'japan/tokyo/image_1.jpg',
-            'japan/tokyo/image_2.jpg'
+            "japan/tokyo/image_0.jpg",
+            "japan/tokyo/image_1.jpg",
+            "japan/tokyo/image_2.jpg",
         ]
 
 
 def test_upload_images_empty_prefix(sample_processed_images, mock_s3_client):
     """Test upload with empty prefix."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
             processed_images=sample_processed_images,
-            bucket='test-bucket',
-            prefix='',
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="",
+            aws_profile="test-profile",
         )
 
         # Verify keys without prefix
-        assert uploaded_keys == [
-            'image_0.jpg',
-            'image_1.jpg',
-            'image_2.jpg'
-        ]
+        assert uploaded_keys == ["image_0.jpg", "image_1.jpg", "image_2.jpg"]
 
 
 def test_upload_images_prefix_with_trailing_slash(sample_processed_images, mock_s3_client):
     """Test upload with prefix containing trailing slash."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
             processed_images=sample_processed_images,
-            bucket='test-bucket',
-            prefix='japan/tokyo/',  # Trailing slash
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="japan/tokyo/",  # Trailing slash
+            aws_profile="test-profile",
         )
 
         # Verify keys are correctly constructed (no double slash)
         assert uploaded_keys == [
-            'japan/tokyo/image_0.jpg',
-            'japan/tokyo/image_1.jpg',
-            'japan/tokyo/image_2.jpg'
+            "japan/tokyo/image_0.jpg",
+            "japan/tokyo/image_1.jpg",
+            "japan/tokyo/image_2.jpg",
         ]
 
 
@@ -177,86 +172,78 @@ def test_upload_images_empty_list():
     """Test upload fails with empty image list."""
     with pytest.raises(ValueError, match="Processed images list cannot be empty"):
         upload_images(
-            processed_images=[],
-            bucket='test-bucket',
-            prefix='japan',
-            aws_profile='test-profile'
+            processed_images=[], bucket="test-bucket", prefix="japan", aws_profile="test-profile"
         )
 
 
 def test_upload_images_aws_session_error(sample_processed_images):
     """Test upload fails when AWS session creation fails with a profile set."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         # Simulate session creation error
         mock_session.side_effect = Exception("Invalid profile")
 
         with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='japan',
-                aws_profile='test-profile'
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile="test-profile",
             )
 
         error_msg = str(exc_info.value)
-        assert 'Failed to create AWS session' in error_msg
-        assert 'test-profile' in error_msg
-        assert 'aws configure --profile test-profile' in error_msg
+        assert "Failed to create AWS session" in error_msg
+        assert "test-profile" in error_msg
+        assert "aws configure --profile test-profile" in error_msg
 
 
 def test_upload_images_aws_session_error_no_profile(sample_processed_images):
     """Test upload session error message guides to .env when no profile is set."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         # Simulate session creation error (e.g. no credentials found)
         mock_session.side_effect = Exception("Unable to locate credentials")
 
         with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='japan',
-                aws_profile=None
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile=None,
             )
 
         error_msg = str(exc_info.value)
-        assert 'Failed to create AWS session' in error_msg
-        assert 'AWS_ACCESS_KEY_ID' in error_msg
-        assert 'AWS_SECRET_ACCESS_KEY' in error_msg
-        assert '.env' in error_msg
+        assert "Failed to create AWS session" in error_msg
+        assert "AWS_ACCESS_KEY_ID" in error_msg
+        assert "AWS_SECRET_ACCESS_KEY" in error_msg
+        assert ".env" in error_msg
 
 
 def test_upload_images_client_error(sample_processed_images, mock_s3_client):
     """Test upload fails immediately on AWS ClientError."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate upload failure on second image
-        error_response = {
-            'Error': {
-                'Code': 'AccessDenied',
-                'Message': 'Access Denied'
-            }
-        }
+        error_response = {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}
         mock_s3_client.upload_file.side_effect = [
             None,  # First upload succeeds
-            ClientError(error_response, 'PutObject'),  # Second fails
+            ClientError(error_response, "PutObject"),  # Second fails
         ]
 
         # Should fail-fast on second image
         with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='japan',
-                aws_profile='test-profile'
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile="test-profile",
             )
 
         # Verify error message includes details
         error_msg = str(exc_info.value)
-        assert 'image_1.jpg' in error_msg
-        assert 's3://test-bucket/japan/image_1.jpg' in error_msg
-        assert 'AccessDenied' in error_msg
-        assert 'Access Denied' in error_msg
+        assert "image_1.jpg" in error_msg
+        assert "s3://test-bucket/japan/image_1.jpg" in error_msg
+        assert "AccessDenied" in error_msg
+        assert "Access Denied" in error_msg
 
         # Verify only 2 uploads attempted (fail-fast)
         assert mock_s3_client.upload_file.call_count == 2
@@ -264,7 +251,7 @@ def test_upload_images_client_error(sample_processed_images, mock_s3_client):
 
 def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
     """Test upload fails immediately on BotoCoreError."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate network error
@@ -273,15 +260,15 @@ def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
         with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='japan',
-                aws_profile='test-profile'
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile="test-profile",
             )
 
         # Verify error message includes filename and key
         error_msg = str(exc_info.value)
-        assert 'image_0.jpg' in error_msg
-        assert 's3://test-bucket/japan/image_0.jpg' in error_msg
+        assert "image_0.jpg" in error_msg
+        assert "s3://test-bucket/japan/image_0.jpg" in error_msg
 
         # Verify only one upload attempted (fail-fast)
         assert mock_s3_client.upload_file.call_count == 1
@@ -289,7 +276,7 @@ def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
 
 def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
     """Test upload fails on generic exception."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate generic error
@@ -298,25 +285,25 @@ def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
         with pytest.raises(UploadError) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='japan',
-                aws_profile='test-profile'
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile="test-profile",
             )
 
         error_msg = str(exc_info.value)
-        assert 'Unknown error' in error_msg
+        assert "Unknown error" in error_msg
 
 
 def test_upload_images_progress_feedback(sample_processed_images, mock_s3_client, capsys):
     """Test progress feedback shows spinner with count."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         upload_images(
             processed_images=sample_processed_images,
-            bucket='test-bucket',
-            prefix='japan',
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="japan",
+            aws_profile="test-profile",
         )
 
         # Capture output
@@ -325,79 +312,79 @@ def test_upload_images_progress_feedback(sample_processed_images, mock_s3_client
         # Verify progress was shown (checking for the pattern)
         # Note: Due to \r carriage returns, exact output is hard to test
         # We can verify the output contains uploading messages
-        assert 'Uploading...' in captured.out or captured.out == ''  # May be cleared
+        assert "Uploading..." in captured.out or captured.out == ""  # May be cleared
 
 
 # Tests for _normalize_prefix()
 
+
 def test_normalize_prefix_empty_string():
     """Test normalizing empty prefix."""
-    assert _normalize_prefix('') == ''
+    assert _normalize_prefix("") == ""
 
 
 def test_normalize_prefix_no_trailing_slash():
     """Test normalizing prefix without trailing slash."""
-    assert _normalize_prefix('japan/tokyo') == 'japan/tokyo'
+    assert _normalize_prefix("japan/tokyo") == "japan/tokyo"
 
 
 def test_normalize_prefix_trailing_slash():
     """Test normalizing prefix with trailing slash."""
-    assert _normalize_prefix('japan/tokyo/') == 'japan/tokyo'
+    assert _normalize_prefix("japan/tokyo/") == "japan/tokyo"
 
 
 def test_normalize_prefix_multiple_trailing_slashes():
     """Test normalizing prefix with multiple trailing slashes."""
-    assert _normalize_prefix('japan///') == 'japan'
+    assert _normalize_prefix("japan///") == "japan"
 
 
 def test_normalize_prefix_whitespace():
     """Test normalizing prefix with whitespace."""
-    assert _normalize_prefix('  japan/tokyo  ') == 'japan/tokyo'
-    assert _normalize_prefix('  japan/tokyo/  ') == 'japan/tokyo'
+    assert _normalize_prefix("  japan/tokyo  ") == "japan/tokyo"
+    assert _normalize_prefix("  japan/tokyo/  ") == "japan/tokyo"
 
 
 def test_normalize_prefix_single_folder():
     """Test normalizing single folder prefix."""
-    assert _normalize_prefix('japan') == 'japan'
-    assert _normalize_prefix('japan/') == 'japan'
+    assert _normalize_prefix("japan") == "japan"
+    assert _normalize_prefix("japan/") == "japan"
 
 
 # Tests for _construct_s3_key()
 
+
 def test_construct_s3_key_with_prefix():
     """Test constructing S3 key with prefix."""
-    assert _construct_s3_key('japan/tokyo', 'image.jpg') == 'japan/tokyo/image.jpg'
+    assert _construct_s3_key("japan/tokyo", "image.jpg") == "japan/tokyo/image.jpg"
 
 
 def test_construct_s3_key_without_prefix():
     """Test constructing S3 key without prefix."""
-    assert _construct_s3_key('', 'image.jpg') == 'image.jpg'
+    assert _construct_s3_key("", "image.jpg") == "image.jpg"
 
 
 def test_construct_s3_key_single_folder():
     """Test constructing S3 key with single folder prefix."""
-    assert _construct_s3_key('japan', 'image.jpg') == 'japan/image.jpg'
+    assert _construct_s3_key("japan", "image.jpg") == "japan/image.jpg"
 
 
 def test_construct_s3_key_deep_hierarchy():
     """Test constructing S3 key with deep folder hierarchy."""
-    assert _construct_s3_key(
-        'italy/trapani/2024',
-        'sunset.jpg'
-    ) == 'italy/trapani/2024/sunset.jpg'
+    assert _construct_s3_key("italy/trapani/2024", "sunset.jpg") == "italy/trapani/2024/sunset.jpg"
 
 
 # Tests for _show_progress()
+
 
 def test_show_progress_output(capsys):
     """Test progress output format."""
     _show_progress(1, 10)
 
     captured = capsys.readouterr()
-    assert 'Uploading...' in captured.out
-    assert '(1/10)' in captured.out
+    assert "Uploading..." in captured.out
+    assert "(1/10)" in captured.out
     # Should contain a spinner character
-    assert any(char in captured.out for char in ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+    assert any(char in captured.out for char in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
 
 
 def test_show_progress_multiple_calls(capsys):
@@ -407,11 +394,12 @@ def test_show_progress_multiple_calls(capsys):
 
     captured = capsys.readouterr()
     # Last update should be visible
-    assert 'Uploading...' in captured.out
-    assert '(3/5)' in captured.out
+    assert "Uploading..." in captured.out
+    assert "(3/5)" in captured.out
 
 
 # Tests for _clear_progress()
+
 
 def test_clear_progress(capsys):
     """Test clearing progress line."""
@@ -423,10 +411,11 @@ def test_clear_progress(capsys):
 
     captured = capsys.readouterr()
     # Verify ANSI clear code is output
-    assert '\033[2K' in captured.out or captured.out.endswith('\r')
+    assert "\033[2K" in captured.out or captured.out.endswith("\r")
 
 
 # Integration-style tests
+
 
 def test_upload_single_image(tmp_path, mock_s3_client):
     """Test uploading a single image."""
@@ -440,27 +429,27 @@ def test_upload_single_image(tmp_path, mock_s3_client):
         original_size=1000000,
         final_size=400000,
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
             processed_images=[processed],
-            bucket='my-bucket',
-            prefix='photos',
-            aws_profile='my-profile'
+            bucket="my-bucket",
+            prefix="photos",
+            aws_profile="my-profile",
         )
 
-        assert uploaded_keys == ['photos/photo.jpg']
+        assert uploaded_keys == ["photos/photo.jpg"]
         assert mock_s3_client.upload_file.call_count == 1
 
 
 def test_upload_preserves_original_filenames(tmp_path, mock_s3_client):
     """Test that original filenames are preserved in S3."""
     # Create images with specific filenames
-    filenames = ['DSC_0001.jpg', 'IMG_2345.jpg', 'vacation_beach.jpg']
+    filenames = ["DSC_0001.jpg", "IMG_2345.jpg", "vacation_beach.jpg"]
     processed_images = []
 
     for filename in filenames:
@@ -473,22 +462,22 @@ def test_upload_preserves_original_filenames(tmp_path, mock_s3_client):
             original_size=500000,
             final_size=400000,
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
         processed_images.append(processed)
 
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         uploaded_keys = upload_images(
             processed_images=processed_images,
-            bucket='test-bucket',
-            prefix='photos',
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="photos",
+            aws_profile="test-profile",
         )
 
         # Verify original filenames are preserved
-        expected_keys = [f'photos/{name}' for name in filenames]
+        expected_keys = [f"photos/{name}" for name in filenames]
         assert uploaded_keys == expected_keys
 
 
@@ -504,29 +493,29 @@ def test_upload_correct_temp_paths_used(tmp_path, mock_s3_client):
         original_size=500000,
         final_size=400000,
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         upload_images(
             processed_images=[processed],
-            bucket='test-bucket',
-            prefix='photos',
-            aws_profile='test-profile'
+            bucket="test-bucket",
+            prefix="photos",
+            aws_profile="test-profile",
         )
 
         # Verify upload_file called with correct temp path
         call_args = mock_s3_client.upload_file.call_args
-        assert call_args[1]['Filename'] == str(temp_file)
-        assert call_args[1]['Bucket'] == 'test-bucket'
-        assert call_args[1]['Key'] == 'photos/original.jpg'
+        assert call_args[1]["Filename"] == str(temp_file)
+        assert call_args[1]["Bucket"] == "test-bucket"
+        assert call_args[1]["Key"] == "photos/original.jpg"
 
 
 def test_upload_fails_fast_preserves_temp_directory(sample_processed_images, mock_s3_client):
     """Test that temp directory is not cleaned up on upload failure."""
-    with patch('photo_terminal.uploader.boto3.Session') as mock_session:
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
         # Simulate upload failure
@@ -540,9 +529,9 @@ def test_upload_fails_fast_preserves_temp_directory(sample_processed_images, moc
         with pytest.raises(UploadError):
             upload_images(
                 processed_images=sample_processed_images,
-                bucket='test-bucket',
-                prefix='photos',
-                aws_profile='test-profile'
+                bucket="test-bucket",
+                prefix="photos",
+                aws_profile="test-profile",
             )
 
         # Verify temp files still exist after failure

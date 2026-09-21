@@ -18,15 +18,15 @@ import sys
 from pathlib import Path
 
 from photo_terminal.config import load_config
-from photo_terminal.scanner import scan_folder
-from photo_terminal.tui import select_images, show_processing_config
-from photo_terminal.s3_browser import browse_s3_folders
 from photo_terminal.confirmation import confirm_upload
 from photo_terminal.dry_run import dry_run_upload
-from photo_terminal.duplicate_checker import check_for_duplicates, DuplicateFilesError
-from photo_terminal.processor import process_images, ProcessingError, InsufficientDiskSpaceError
-from photo_terminal.uploader import upload_images, UploadError
+from photo_terminal.duplicate_checker import DuplicateFilesError, check_for_duplicates
+from photo_terminal.processor import InsufficientDiskSpaceError, ProcessingError, process_images
+from photo_terminal.s3_browser import browse_s3_folders
+from photo_terminal.scanner import scan_folder
 from photo_terminal.summary import show_completion_summary
+from photo_terminal.tui import select_images, show_processing_config
+from photo_terminal.uploader import UploadError, upload_images
 
 
 def validate_folder_path(folder_path: str) -> Path:
@@ -86,12 +86,12 @@ def print_effective_config(cfg, args, folder_path: Path) -> None:
 def main():
     """Main CLI entry point."""
     # Enable debug logging if environment variable is set
-    if os.environ.get('PHOTO_TERMINAL_DEBUG'):
+    if os.environ.get("PHOTO_TERMINAL_DEBUG"):
         logging.basicConfig(
-            filename='/tmp/photo_terminal_debug.log',
+            filename="/tmp/photo_terminal_debug.log",
             level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            force=True
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            force=True,
         )
         # Also log to console
         console_handler = logging.StreamHandler()
@@ -111,7 +111,7 @@ def main():
 
     # Set up argument parser
     parser = argparse.ArgumentParser(
-        description='Upload and optimize photos to S3 with inline preview',
+        description="Upload and optimize photos to S3 with inline preview",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -122,34 +122,25 @@ Examples:
 Configuration:
   Edit photo-uploader.yaml to change default settings.
   CLI arguments override config file values.
-        """
+        """,
     )
 
     # Required positional argument
-    parser.add_argument(
-        'folder_path',
-        help='Path to folder containing images'
-    )
+    parser.add_argument("folder_path", help="Path to folder containing images")
 
     # Optional arguments
     parser.add_argument(
-        '--prefix',
-        help='S3 prefix/folder path (e.g., "japan/tokyo")',
-        default=None
+        "--prefix", help='S3 prefix/folder path (e.g., "japan/tokyo")', default=None
     )
 
     parser.add_argument(
-        '--target-size',
+        "--target-size",
         type=int,
-        metavar='KB',
-        help=f'Target file size in KB (default: {cfg.target_size_kb})'
+        metavar="KB",
+        help=f"Target file size in KB (default: {cfg.target_size_kb})",
     )
 
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Preview without uploading'
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Preview without uploading")
 
     # Parse arguments
     args = parser.parse_args()
@@ -191,14 +182,14 @@ Configuration:
     try:
         response = input("Reorder images? (y/N): ").strip().lower()
     except EOFError:
-        response = 'n'
+        response = "n"
 
-    if response in ('y', 'yes'):
+    if response in ("y", "yes"):
         try:
             from photo_terminal.reorder_ui import reorder_images_interactive
-        except ImportError as e:
-            print(f"\nError: Missing required dependency for image reordering")
-            print(f"Install with: pip install readchar")
+        except ImportError:
+            print("\nError: Missing required dependency for image reordering")
+            print("Install with: pip install readchar")
             return 1
 
         print()
@@ -211,7 +202,9 @@ Configuration:
             # Store the reorder mapping
             image_reorder_map = dict(result)
             print()
-            print(f"✓ Images reordered - {len(result)} images will be uploaded with numeric prefixes")
+            print(
+                f"✓ Images reordered - {len(result)} images will be uploaded with numeric prefixes"
+            )
     else:
         print("Skipping reorder - using original order")
 
@@ -234,7 +227,7 @@ Configuration:
     print()
     print("Processing configuration:")
     print(f"  Resize images:     {'Yes' if processing_config['resize'] else 'No'}")
-    if processing_config['resize']:
+    if processing_config["resize"]:
         print(f"  Target size:       {processing_config['target_size_kb']} KB")
     print(f"  Preserve EXIF:     {'Yes' if processing_config['preserve_exif'] else 'No'}")
     print(f"  Output format:     {processing_config['output_format']}")
@@ -246,7 +239,7 @@ Configuration:
         selected_prefix = browse_s3_folders(
             cfg.bucket,
             cfg.aws_profile,
-            args.prefix  # None if not provided, which triggers interactive browser
+            args.prefix,  # None if not provided, which triggers interactive browser
         )
     except SystemExit:
         return 1
@@ -269,14 +262,18 @@ Configuration:
     if args.dry_run:
         # Run dry-run mode (shows sizes, exits without uploading)
         try:
-            target_size = processing_config['target_size_kb'] if processing_config['resize'] else cfg.target_size_kb
+            target_size = (
+                processing_config["target_size_kb"]
+                if processing_config["resize"]
+                else cfg.target_size_kb
+            )
             dry_run_upload(
                 selected_images,
                 cfg.bucket,
                 selected_prefix,
                 target_size,
                 cfg.aws_profile,
-                processing_config['output_format']
+                processing_config["output_format"],
             )
         except SystemExit as e:
             # dry_run_upload always exits - return its exit code
@@ -285,12 +282,7 @@ Configuration:
     # Check for duplicates in S3 (fail-fast before processing)
     print("Checking for duplicate files in S3...")
     try:
-        check_for_duplicates(
-            selected_images,
-            cfg.bucket,
-            selected_prefix,
-            cfg.aws_profile
-        )
+        check_for_duplicates(selected_images, cfg.bucket, selected_prefix, cfg.aws_profile)
         print("No duplicates found - proceeding with upload")
         print()
     except DuplicateFilesError as e:
@@ -307,13 +299,13 @@ Configuration:
     print()
     try:
         # Use target size from processing config if resize is enabled
-        target_size = processing_config['target_size_kb'] if processing_config['resize'] else None
+        target_size = processing_config["target_size_kb"] if processing_config["resize"] else None
         temp_dir, processed_images = process_images(
             selected_images,
             target_size if target_size else cfg.target_size_kb,
-            processing_config['output_format'],
+            processing_config["output_format"],
             max_dimension=1920,
-            filename_map=image_reorder_map
+            filename_map=image_reorder_map,
         )
     except InsufficientDiskSpaceError as e:
         print(f"Error: {e}")
@@ -328,10 +320,7 @@ Configuration:
     # Upload to S3 with progress feedback
     try:
         uploaded_keys = upload_images(
-            processed_images,
-            cfg.bucket,
-            selected_prefix,
-            cfg.aws_profile
+            processed_images, cfg.bucket, selected_prefix, cfg.aws_profile
         )
     except UploadError as e:
         print(f"Error: {e}")
@@ -346,12 +335,7 @@ Configuration:
 
     # Show completion summary
     try:
-        show_completion_summary(
-            processed_images,
-            uploaded_keys,
-            cfg.bucket,
-            selected_prefix
-        )
+        show_completion_summary(processed_images, uploaded_keys, cfg.bucket, selected_prefix)
     except Exception as e:
         print(f"Warning: Failed to display completion summary: {e}")
         # Don't fail on summary display error
@@ -369,5 +353,5 @@ Configuration:
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

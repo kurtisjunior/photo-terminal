@@ -4,9 +4,8 @@ Provides logic for interactively reordering images before upload.
 Supports grab-and-drop interaction with real-time state management.
 """
 
-from pathlib import Path
-from typing import List, Tuple, Optional
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -19,10 +18,11 @@ class ReorderState:
         grabbed_index: Index of grabbed image, None if nothing grabbed
         original_order: Original image order for reset functionality
     """
-    images: List[Path]
+
+    images: list[Path]
     current_index: int = 0
-    grabbed_index: Optional[int] = None
-    original_order: List[Path] = None
+    grabbed_index: int | None = None
+    original_order: list[Path] | None = None
 
     def __post_init__(self):
         """Store original order for reset functionality."""
@@ -45,7 +45,7 @@ class ImageReorderer:
         ordered_paths = reorderer.get_ordered_images()
     """
 
-    def __init__(self, images: List[Path]):
+    def __init__(self, images: list[Path]):
         """Initialize reorderer with list of image paths.
 
         Args:
@@ -75,8 +75,10 @@ class ImageReorderer:
 
             # Swap with item above
             idx = self.state.grabbed_index
-            self.state.images[idx], self.state.images[idx - 1] = \
-                self.state.images[idx - 1], self.state.images[idx]
+            self.state.images[idx], self.state.images[idx - 1] = (
+                self.state.images[idx - 1],
+                self.state.images[idx],
+            )
 
             # Update indices
             self.state.grabbed_index -= 1
@@ -106,8 +108,10 @@ class ImageReorderer:
 
             # Swap with item below
             idx = self.state.grabbed_index
-            self.state.images[idx], self.state.images[idx + 1] = \
-                self.state.images[idx + 1], self.state.images[idx]
+            self.state.images[idx], self.state.images[idx + 1] = (
+                self.state.images[idx + 1],
+                self.state.images[idx],
+            )
 
             # Update indices
             self.state.grabbed_index += 1
@@ -164,7 +168,7 @@ class ImageReorderer:
         self.state.current_index = 0
         self.state.grabbed_index = None
 
-    def get_ordered_images(self) -> List[Path]:
+    def get_ordered_images(self) -> list[Path]:
         """Get current image order.
 
         Returns:
@@ -188,7 +192,7 @@ class ImageReorderer:
         """
         return self.state.grabbed_index is not None
 
-    def get_grabbed_index(self) -> Optional[int]:
+    def get_grabbed_index(self) -> int | None:
         """Get index of grabbed image.
 
         Returns:
@@ -197,7 +201,7 @@ class ImageReorderer:
         return self.state.grabbed_index
 
 
-def generate_prefixed_filenames(images: List[Path]) -> List[Tuple[Path, str]]:
+def generate_prefixed_filenames(images: list[Path]) -> list[tuple[Path, str]]:
     """Generate prefixed filenames for ordered upload.
 
     Creates numeric prefixes (01_, 02_, 03_, etc.) to maintain order on S3.
@@ -227,7 +231,7 @@ def generate_prefixed_filenames(images: List[Path]) -> List[Tuple[Path, str]]:
     return result
 
 
-def get_final_filenames_preview(images: List[Path]) -> str:
+def get_final_filenames_preview(images: list[Path]) -> str:
     """Generate a preview string of final upload filenames.
 
     Args:
@@ -244,8 +248,8 @@ def get_final_filenames_preview(images: List[Path]) -> str:
 
     # Limit to first 3 and last 1 if more than 4 images
     if len(filenames) > 4:
-        preview = filenames[:3] + ['...'] + [filenames[-1]]
+        preview = filenames[:3] + ["..."] + [filenames[-1]]
     else:
         preview = filenames
 
-    return ' → '.join(preview)
+    return " → ".join(preview)

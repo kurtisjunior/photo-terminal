@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import select
 import sys
-from typing import Optional
 
 KEY_UP = "UP"
 KEY_DOWN = "DOWN"
@@ -33,7 +32,7 @@ def _read_one_char() -> str:
     return data.decode("ascii", errors="replace")
 
 
-def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
+def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> str | None:
     """Read a single key or decoded escape sequence.
 
     Returns:
@@ -68,7 +67,7 @@ def read_key(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
     return None
 
 
-def read_key_with_timeout(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional[str]:
+def read_key_with_timeout(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> str | None:
     """Read a key if available within timeout_sec.
 
     Returns:
@@ -79,7 +78,9 @@ def read_key_with_timeout(timeout_sec: float = _DEFAULT_ESC_TIMEOUT) -> Optional
     return read_key(timeout_sec)
 
 
-def read_key_with_timeout_or_signal(timeout_sec: float, extra_fds: list = None) -> Optional[str]:
+def read_key_with_timeout_or_signal(
+    timeout_sec: float, extra_fds: list[int] | None = None
+) -> str | None:
     """Read a key if available, or return None if timeout or signaled by extra_fds.
 
     Args:

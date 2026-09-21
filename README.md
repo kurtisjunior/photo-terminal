@@ -21,7 +21,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ### System Requirements
 
-- **Python 3.8+**
+- **Python 3.12+** (the pinned `nix develop` shell provides it)
 - **AWS credentials** — a `.env` file with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (recommended) or an AWS CLI profile
 - Terminal supporting 256+ colors
 
@@ -470,17 +470,20 @@ Image mode is preserved when possible (RGB, RGBA, grayscale).
 
 ## Testing
 
-Run the test suite:
+Everything runs inside the pinned `nix develop` shell, which is what CI uses
+too, and the dev tooling lives behind the `dev` extra:
 
 ```bash
-# Run all tests
-pytest
+# Run all tests (zero skips tolerated, as in CI)
+nix develop -c uv run --extra dev pytest -q --no-skips
 
 # Run specific test file
-pytest tests/test_photo_upload.py -v
+nix develop -c uv run --extra dev pytest tests/test_photo_upload.py -v
 
-# Run with coverage
-pytest --cov=photo_terminal --cov-report=html
+# Lint, format and type checks
+nix develop -c uv run --extra dev ruff check .
+nix develop -c uv run --extra dev ruff format --check .
+nix develop -c uv run --extra dev mypy photo_terminal
 ```
 
 ## Environment Variables
@@ -577,16 +580,14 @@ photo-terminal/
 
 ```bash
 # Run all tests with verbose output
-pytest -v
+nix develop -c uv run --extra dev pytest -v
 
 # Run specific module tests
-pytest tests/test_summary.py -v
+nix develop -c uv run --extra dev pytest tests/test_summary.py -v
 
 # Run integration tests
-pytest tests/test_photo_upload.py::test_full_workflow_success -v
-
-# Run with coverage
-pytest --cov=photo_terminal --cov-report=html
+nix develop -c uv run --extra dev pytest \
+    tests/test_photo_upload.py::test_full_workflow_success -v
 ```
 
 ## Design Philosophy

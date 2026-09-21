@@ -5,16 +5,14 @@ Supports JPEG, PNG, WEBP, TIFF, BMP, GIF. No RAW format support.
 """
 
 from pathlib import Path
-from typing import List
 
 from PIL import Image
 
-
 # Supported image formats
-SUPPORTED_FORMATS = {'JPEG', 'PNG', 'WEBP', 'TIFF', 'BMP', 'GIF'}
+SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP", "TIFF", "BMP", "GIF"}
 
 # Common image file extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.tiff', '.tif', '.bmp', '.gif'}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".tif", ".bmp", ".gif"}
 
 
 def is_valid_image(file_path: Path) -> bool:
@@ -39,14 +37,14 @@ def is_valid_image(file_path: Path) -> bool:
             # Check if format is supported
             if img.format in SUPPORTED_FORMATS:
                 return True
-    except (IOError, OSError):
+    except OSError:
         # Not a valid image file
         pass
 
     return False
 
 
-def scan_folder(folder_path: str) -> List[Path]:
+def scan_folder(folder_path: str) -> list[Path]:
     """Scan folder for valid image files.
 
     Args:
@@ -61,16 +59,10 @@ def scan_folder(folder_path: str) -> List[Path]:
     path = Path(folder_path).resolve()
 
     # Get all files in folder (non-recursive, exclude hidden files)
-    all_files = [
-        f for f in path.iterdir()
-        if f.is_file() and not f.name.startswith('.')
-    ]
+    all_files = [f for f in path.iterdir() if f.is_file() and not f.name.startswith(".")]
 
     # Filter to valid images
-    valid_images = [
-        f for f in all_files
-        if is_valid_image(f)
-    ]
+    valid_images = [f for f in all_files if is_valid_image(f)]
 
     # Fail-fast if no valid images found
     if not valid_images:

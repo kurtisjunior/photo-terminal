@@ -15,7 +15,7 @@ You are responsible for implementing and maintaining the Terminal Image Upload M
 A terminal-based image upload manager with two-pane TUI interface for interactive file selection, inline preview, and batch JPEG optimization for S3 uploads. Personal photography workflow tool with fail-fast error handling and minimal UI.
 
 **Project ID**: 4d942c5e
-**Stack**: Python 3.8+, Pillow, boto3, viu, rich/textual
+**Stack**: Python 3.12+, Pillow, boto3, viu, rich/textual
 **AWS Profile**: kurtis-site
 **Target Bucket**: two-touch
 

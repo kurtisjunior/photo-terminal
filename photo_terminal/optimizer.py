@@ -6,12 +6,9 @@ preserving aspect ratio and basic EXIF data (camera, date, GPS).
 """
 
 from pathlib import Path
-from typing import Dict, Optional
-import io
+from typing import Any
 
 from PIL import Image
-from PIL.ExifTags import TAGS
-
 
 # Quality iteration steps from highest to minimum acceptable
 QUALITY_STEPS = [95, 90, 85, 80, 75, 70, 65, 60]
@@ -19,17 +16,18 @@ MINIMUM_QUALITY = 60
 
 # EXIF tags to preserve (camera model, date taken, GPS)
 PRESERVE_EXIF_TAGS = {
-    'Make',  # Camera manufacturer
-    'Model',  # Camera model
-    'DateTimeOriginal',  # Date photo was taken
-    'DateTime',  # Date file was modified
-    'DateTimeDigitized',  # Date photo was digitized
-    'GPSInfo',  # GPS coordinates
+    "Make",  # Camera manufacturer
+    "Model",  # Camera model
+    "DateTimeOriginal",  # Date photo was taken
+    "DateTime",  # Date file was modified
+    "DateTimeDigitized",  # Date photo was digitized
+    "GPSInfo",  # GPS coordinates
 }
 
 
 class OptimizationWarning:
     """Warning types for optimization process."""
+
     TARGET_NOT_REACHED = "target_size_not_reached"
     EXIF_PRESERVATION_FAILED = "exif_preservation_failed"
     NO_EXIF_DATA = "no_exif_data"
@@ -39,9 +37,9 @@ def optimize_image(
     input_path: Path,
     output_path: Path,
     target_size_kb: int = 400,
-    output_format: str = 'JPEG',
-    max_dimension: int = 1920
-) -> Dict:
+    output_format: str = "JPEG",
+    max_dimension: int = 1920,
+) -> dict:
     """Optimize image to target file size with EXIF preservation and resizing.
 
     Opens image with Pillow, resizes if needed, extracts EXIF data, and iteratively
@@ -75,7 +73,7 @@ def optimize_image(
     """
     # Validate output format
     output_format = output_format.upper()
-    if output_format not in ('JPEG', 'PNG', 'WEBP'):
+    if output_format not in ("JPEG", "PNG", "WEBP"):
         raise ValueError(f"Unsupported output format: {output_format}. Must be JPEG, PNG, or WEBP")
 
     # Fail-fast: Validate input file exists
@@ -86,10 +84,11 @@ def optimize_image(
     original_size = input_path.stat().st_size
 
     # Fail-fast: Try to open image
+    img: Image.Image
     try:
         img = Image.open(input_path)
     except Exception as e:
-        raise ValueError(f"Cannot open image file: {input_path}. Error: {e}")
+        raise ValueError(f"Cannot open image file: {input_path}. Error: {e}") from e
 
     # Store original format and dimensions for reporting
     original_format = img.format or "UNKNOWN"
@@ -113,25 +112,25 @@ def optimize_image(
     final_dimensions = (img.width, img.height)
 
     # Convert to appropriate mode for output format
-    if output_format == 'PNG':
+    if output_format == "PNG":
         # PNG supports RGBA, so preserve transparency if present
-        if img.mode in ('RGBA', 'LA', 'PA'):
-            img = img.convert('RGBA')
-        elif img.mode not in ('RGB', 'L', 'RGBA'):
-            img = img.convert('RGB')
+        if img.mode in ("RGBA", "LA", "PA"):
+            img = img.convert("RGBA")
+        elif img.mode not in ("RGB", "L", "RGBA"):
+            img = img.convert("RGB")
     else:
         # JPEG and WEBP don't support transparency
-        if img.mode not in ('RGB', 'L'):
+        if img.mode not in ("RGB", "L"):
             # Convert RGBA to RGB by compositing on white background
-            if img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == "RGBA":
+                background = Image.new("RGB", img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[3])  # Use alpha channel as mask
                 img = background
             else:
-                img = img.convert('RGB')
-        elif img.mode == 'L':
+                img = img.convert("RGB")
+        elif img.mode == "L":
             # Convert grayscale to RGB
-            img = img.convert('RGB')
+            img = img.convert("RGB")
 
     # Extract and filter EXIF data (best-effort)
     exif_data, exif_warnings = _extract_exif(img)
@@ -140,7 +139,7 @@ def optimize_image(
     target_size_bytes = target_size_kb * 1024
 
     # Handle PNG differently (lossless format)
-    if output_format == 'PNG':
+    if output_format == "PNG":
         # PNG is lossless, so we can't optimize to target size
         # Just use maximum compression
         _save_image(img, output_path, output_format, compress_level=9, exif_data=exif_data)
@@ -155,29 +154,29 @@ def optimize_image(
             )
 
         return {
-            'original_size': original_size,
-            'final_size': final_size,
-            'quality_used': 9,  # compression level
-            'format': original_format,
-            'output_format': output_format,
-            'resized': resized,
-            'original_dimensions': original_dimensions,
-            'final_dimensions': final_dimensions,
-            'warnings': warnings
+            "original_size": original_size,
+            "final_size": final_size,
+            "quality_used": 9,  # compression level
+            "format": original_format,
+            "output_format": output_format,
+            "resized": resized,
+            "original_dimensions": original_dimensions,
+            "final_dimensions": final_dimensions,
+            "warnings": warnings,
         }
 
     # For JPEG and WEBP, use quality iteration to reach target size
-    quality_used = None
-    final_size = None
+    quality_used: int | None = None
+    jpeg_size: int | None = None
     warnings = exif_warnings.copy()
 
     for quality in QUALITY_STEPS:
         # Save to output path
         _save_image(img, output_path, output_format, quality=quality, exif_data=exif_data)
-        final_size = output_path.stat().st_size
+        jpeg_size = output_path.stat().st_size
 
         # Check if we reached target
-        if final_size <= target_size_bytes:
+        if jpeg_size <= target_size_bytes:
             quality_used = quality
             break
 
@@ -187,23 +186,23 @@ def optimize_image(
         warnings.append(
             f"{OptimizationWarning.TARGET_NOT_REACHED}: "
             f"Could not reach target size of {target_size_kb}KB at minimum quality {MINIMUM_QUALITY}. "
-            f"Final size: {final_size / 1024:.1f}KB"
+            f"Final size: {(jpeg_size or 0) / 1024:.1f}KB"
         )
 
     return {
-        'original_size': original_size,
-        'final_size': final_size,
-        'quality_used': quality_used,
-        'format': original_format,
-        'output_format': output_format,
-        'resized': resized,
-        'original_dimensions': original_dimensions,
-        'final_dimensions': final_dimensions,
-        'warnings': warnings
+        "original_size": original_size,
+        "final_size": jpeg_size,
+        "quality_used": quality_used,
+        "format": original_format,
+        "output_format": output_format,
+        "resized": resized,
+        "original_dimensions": original_dimensions,
+        "final_dimensions": final_dimensions,
+        "warnings": warnings,
     }
 
 
-def _extract_exif(img: Image.Image) -> tuple[Optional[bytes], list[str]]:
+def _extract_exif(img: Image.Image) -> tuple[bytes | None, list[str]]:
     """Extract and filter EXIF data from image.
 
     Best-effort extraction - returns None if EXIF data is missing or corrupted.
@@ -229,12 +228,11 @@ def _extract_exif(img: Image.Image) -> tuple[Optional[bytes], list[str]]:
         # Filter to only preserve specific tags
         # Note: Pillow's getexif() returns ExifTags which can be passed to save()
         # We'll return the raw exif data and let save() handle it
-        return exif.tobytes() if hasattr(exif, 'tobytes') else img.info.get('exif'), warnings
+        return exif.tobytes() if hasattr(exif, "tobytes") else img.info.get("exif"), warnings
 
     except Exception as e:
         warnings.append(
-            f"{OptimizationWarning.EXIF_PRESERVATION_FAILED}: "
-            f"Could not extract EXIF data: {e}"
+            f"{OptimizationWarning.EXIF_PRESERVATION_FAILED}: Could not extract EXIF data: {e}"
         )
         return None, warnings
 
@@ -243,9 +241,9 @@ def _save_image(
     img: Image.Image,
     output_path: Path,
     output_format: str,
-    quality: int = None,
-    compress_level: int = None,
-    exif_data: Optional[bytes] = None
+    quality: int | None = None,
+    compress_level: int | None = None,
+    exif_data: bytes | None = None,
 ) -> None:
     """Save image with specified format, quality/compression, and EXIF data.
 
@@ -262,31 +260,31 @@ def _save_image(
     """
     try:
         # Prepare save parameters based on format
-        save_kwargs = {
-            'format': output_format,
+        save_kwargs: dict[str, Any] = {
+            "format": output_format,
         }
 
-        if output_format == 'JPEG':
-            save_kwargs['quality'] = quality if quality is not None else 95
-            save_kwargs['optimize'] = True
+        if output_format == "JPEG":
+            save_kwargs["quality"] = quality if quality is not None else 95
+            save_kwargs["optimize"] = True
             # Add EXIF data if available
             if exif_data is not None:
-                save_kwargs['exif'] = exif_data
+                save_kwargs["exif"] = exif_data
 
-        elif output_format == 'PNG':
-            save_kwargs['compress_level'] = compress_level if compress_level is not None else 9
-            save_kwargs['optimize'] = True
+        elif output_format == "PNG":
+            save_kwargs["compress_level"] = compress_level if compress_level is not None else 9
+            save_kwargs["optimize"] = True
             # PNG can store EXIF in metadata, but it's less common
             # Pillow doesn't directly support EXIF in PNG via 'exif' parameter
 
-        elif output_format == 'WEBP':
-            save_kwargs['quality'] = quality if quality is not None else 95
+        elif output_format == "WEBP":
+            save_kwargs["quality"] = quality if quality is not None else 95
             # WEBP supports EXIF
             if exif_data is not None:
-                save_kwargs['exif'] = exif_data
+                save_kwargs["exif"] = exif_data
 
         # Save the image
         img.save(output_path, **save_kwargs)
 
     except Exception as e:
-        raise IOError(f"Could not save image to {output_path}: {e}")
+        raise OSError(f"Could not save image to {output_path}: {e}") from e

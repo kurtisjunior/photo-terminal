@@ -1,12 +1,11 @@
 """Tests for completion summary module."""
 
-import pytest
 from pathlib import Path
-from io import StringIO
-import sys
 
-from photo_terminal.summary import show_completion_summary, _format_size
+import pytest
+
 from photo_terminal.processor import ProcessedImage
+from photo_terminal.summary import _format_size, show_completion_summary
 
 
 @pytest.fixture
@@ -19,7 +18,7 @@ def sample_processed_images():
             original_size=5_000_000,  # 5 MB
             final_size=400_000,  # 400 KB
             quality_used=85,
-            warnings=[]
+            warnings=[],
         ),
         ProcessedImage(
             original_path=Path("/source/image2.jpg"),
@@ -27,7 +26,7 @@ def sample_processed_images():
             original_size=8_000_000,  # 8 MB
             final_size=450_000,  # 450 KB
             quality_used=80,
-            warnings=[]
+            warnings=[],
         ),
         ProcessedImage(
             original_path=Path("/source/photo.png"),
@@ -35,24 +34,20 @@ def sample_processed_images():
             original_size=12_000_000,  # 12 MB
             final_size=380_000,  # 380 KB
             quality_used=90,
-            warnings=[]
+            warnings=[],
         ),
     ]
 
 
 def test_show_completion_summary_with_prefix(sample_processed_images, capsys):
     """Test completion summary with S3 prefix."""
-    uploaded_keys = [
-        "japan/tokyo/image1.jpg",
-        "japan/tokyo/image2.jpg",
-        "japan/tokyo/photo.png"
-    ]
+    uploaded_keys = ["japan/tokyo/image1.jpg", "japan/tokyo/image2.jpg", "japan/tokyo/photo.png"]
 
     show_completion_summary(
         processed_images=sample_processed_images,
         uploaded_keys=uploaded_keys,
         bucket="two-touch",
-        prefix="japan/tokyo"
+        prefix="japan/tokyo",
     )
 
     captured = capsys.readouterr()
@@ -81,17 +76,13 @@ def test_show_completion_summary_with_prefix(sample_processed_images, capsys):
 
 def test_show_completion_summary_without_prefix(sample_processed_images, capsys):
     """Test completion summary with empty prefix (bucket root)."""
-    uploaded_keys = [
-        "image1.jpg",
-        "image2.jpg",
-        "photo.png"
-    ]
+    uploaded_keys = ["image1.jpg", "image2.jpg", "photo.png"]
 
     show_completion_summary(
         processed_images=sample_processed_images,
         uploaded_keys=uploaded_keys,
         bucket="two-touch",
-        prefix=""
+        prefix="",
     )
 
     captured = capsys.readouterr()
@@ -110,7 +101,7 @@ def test_show_completion_summary_mismatch_lengths(sample_processed_images):
     """Test error when processed_images and uploaded_keys lengths don't match."""
     uploaded_keys = [
         "japan/tokyo/image1.jpg",
-        "japan/tokyo/image2.jpg"
+        "japan/tokyo/image2.jpg",
         # Missing third key
     ]
 
@@ -119,7 +110,7 @@ def test_show_completion_summary_mismatch_lengths(sample_processed_images):
             processed_images=sample_processed_images,
             uploaded_keys=uploaded_keys,
             bucket="two-touch",
-            prefix="japan/tokyo"
+            prefix="japan/tokyo",
         )
 
     assert "Mismatch" in str(exc_info.value)
@@ -136,7 +127,7 @@ def test_show_completion_summary_single_file(capsys):
             original_size=3_000_000,  # 3 MB
             final_size=350_000,  # 350 KB
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
     ]
     uploaded_keys = ["photos/single.jpg"]
@@ -145,7 +136,7 @@ def test_show_completion_summary_single_file(capsys):
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="my-bucket",
-        prefix="photos"
+        prefix="photos",
     )
 
     captured = capsys.readouterr()
@@ -166,7 +157,7 @@ def test_show_completion_summary_large_savings(capsys):
             original_size=100_000_000,  # 100 MB
             final_size=500_000,  # 500 KB
             quality_used=70,
-            warnings=[]
+            warnings=[],
         )
     ]
     uploaded_keys = ["huge.jpg"]
@@ -175,7 +166,7 @@ def test_show_completion_summary_large_savings(capsys):
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="my-bucket",
-        prefix=""
+        prefix="",
     )
 
     captured = capsys.readouterr()
@@ -237,7 +228,7 @@ def test_show_completion_summary_nested_prefix(capsys):
             original_size=2_000_000,
             final_size=400_000,
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
     ]
     uploaded_keys = ["italy/trapani/beaches/pic.jpg"]
@@ -246,7 +237,7 @@ def test_show_completion_summary_nested_prefix(capsys):
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="photos",
-        prefix="italy/trapani/beaches"
+        prefix="italy/trapani/beaches",
     )
 
     captured = capsys.readouterr()
@@ -268,23 +259,20 @@ def test_show_completion_summary_output_format(capsys):
             original_size=1_000_000,
             final_size=400_000,
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
     ]
     uploaded_keys = ["test.jpg"]
 
     show_completion_summary(
-        processed_images=processed_images,
-        uploaded_keys=uploaded_keys,
-        bucket="bucket",
-        prefix=""
+        processed_images=processed_images, uploaded_keys=uploaded_keys, bucket="bucket", prefix=""
     )
 
     captured = capsys.readouterr()
     output = captured.out
 
     # Check structure matches spec format
-    lines = output.strip().split('\n')
+    lines = output.strip().split("\n")
 
     # Should have:
     # - Empty line

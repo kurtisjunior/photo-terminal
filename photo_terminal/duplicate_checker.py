@@ -4,9 +4,8 @@ Checks if filenames already exist in target S3 prefix before upload.
 Uses boto3 HeadObject for fail-fast duplicate detection.
 """
 
-from pathlib import Path
-from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
@@ -15,7 +14,7 @@ from botocore.exceptions import ClientError
 class DuplicateFilesError(Exception):
     """Raised when duplicate files are found in S3 target prefix."""
 
-    def __init__(self, duplicates: List[str], bucket: str, prefix: str):
+    def __init__(self, duplicates: list[str], bucket: str, prefix: str):
         """Initialize with list of duplicate filenames.
 
         Args:
@@ -28,7 +27,7 @@ class DuplicateFilesError(Exception):
         self.prefix = prefix
 
         # Format error message
-        files_list = '\n  - '.join(duplicates)
+        files_list = "\n  - ".join(duplicates)
         s3_path = f"s3://{bucket}/{prefix}" if prefix else f"s3://{bucket}/"
 
         message = (
@@ -40,10 +39,7 @@ class DuplicateFilesError(Exception):
 
 
 def check_for_duplicates(
-    images: List[Path],
-    bucket: str,
-    prefix: str,
-    aws_profile: Optional[str]
+    images: list[Path], bucket: str, prefix: str, aws_profile: str | None
 ) -> None:
     """Check if any image filenames already exist in S3 target prefix.
 
@@ -70,7 +66,7 @@ def check_for_duplicates(
     # Initialize S3 client with profile (or from environment)
     try:
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-        s3_client = session.client('s3')
+        s3_client = session.client("s3")
     except Exception as e:
         if aws_profile:
             print(f"Error: Failed to initialize AWS session with profile '{aws_profile}'")
@@ -84,15 +80,15 @@ def check_for_duplicates(
                 "(see .env.example), or configure an AWS CLI profile with: "
                 "aws configure --profile <profile-name>"
             )
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # Normalize prefix (ensure no leading slash, add trailing slash if not empty)
     if prefix:
-        prefix = prefix.strip('/')
+        prefix = prefix.strip("/")
         if prefix:
-            prefix = prefix + '/'
+            prefix = prefix + "/"
     else:
-        prefix = ''
+        prefix = ""
 
     # Check for duplicates (use parallel checks if many files)
     duplicates = []
@@ -109,12 +105,7 @@ def check_for_duplicates(
         raise DuplicateFilesError(duplicates, bucket, prefix)
 
 
-def _check_sequential(
-    s3_client,
-    images: List[Path],
-    bucket: str,
-    prefix: str
-) -> List[str]:
+def _check_sequential(s3_client, images: list[Path], bucket: str, prefix: str) -> list[str]:
     """Check for duplicates sequentially.
 
     Args:
@@ -138,12 +129,7 @@ def _check_sequential(
     return duplicates
 
 
-def _check_parallel(
-    s3_client,
-    images: List[Path],
-    bucket: str,
-    prefix: str
-) -> List[str]:
+def _check_parallel(s3_client, images: list[Path], bucket: str, prefix: str) -> list[str]:
     """Check for duplicates in parallel using ThreadPoolExecutor.
 
     Args:
@@ -199,25 +185,25 @@ def _key_exists(s3_client, bucket: str, key: str) -> bool:
         s3_client.head_object(Bucket=bucket, Key=key)
         return True
     except ClientError as e:
-        error_code = e.response.get('Error', {}).get('Code', '')
+        error_code = e.response.get("Error", {}).get("Code", "")
 
         # 404 means key doesn't exist - this is expected and good
-        if error_code == '404':
+        if error_code == "404":
             return False
 
         # 403 means permission denied
-        if error_code == '403':
+        if error_code == "403":
             print(f"Error: Permission denied accessing S3 bucket '{bucket}'")
             print(f"Details: {e}")
-            print(f"\nMake sure your AWS credentials have s3:GetObject permission")
-            raise SystemExit(1)
+            print("\nMake sure your AWS credentials have s3:GetObject permission")
+            raise SystemExit(1) from None
 
         # Other errors are unexpected
         print(f"Error: Failed to check S3 key: {key}")
         print(f"Details: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     except Exception as e:
         # Network or other errors
-        print(f"Error: Failed to connect to S3")
+        print("Error: Failed to connect to S3")
         print(f"Details: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None

@@ -10,6 +10,7 @@ Provides a terminal interface with:
 - Keyboard controls: arrows to navigate, y/spacebar to mark, a to select all, enter to lock, n to proceed
 """
 
+import functools
 import logging
 import os
 import re
@@ -17,20 +18,25 @@ import shutil
 import subprocess
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional
+from typing import Any
 
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout, read_key_with_timeout_or_signal
+from photo_terminal.input_utils import (
+    KEY_DOWN,
+    KEY_ESC,
+    KEY_UP,
+    read_key_with_timeout_or_signal,
+)
 from photo_terminal.renderer import render_image_to_ansi
 
 # Pre-compiled regex for stripping ANSI escape codes (hot path optimisation)
-_ANSI_ESCAPE_RE = re.compile(r'\033\[[0-9;]*m')
+_ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -82,31 +88,31 @@ class TerminalCapabilities:
         # Check for terminal multiplexers first
         # TMUX is set when inside tmux, STY is set when inside GNU screen
         # They typically break graphics protocols
-        if os.environ.get('TMUX') or os.environ.get('STY'):
-            return 'blocks'
+        if os.environ.get("TMUX") or os.environ.get("STY"):
+            return "blocks"
 
         # Proceed with protocol detection
-        term_program = os.environ.get('TERM_PROGRAM', '')
-        term = os.environ.get('TERM', '')
+        term_program = os.environ.get("TERM_PROGRAM", "")
+        term = os.environ.get("TERM", "")
 
         # iTerm2 detection (heuristic, may false-positive on older versions)
-        if term_program == 'iTerm.app':
-            return 'iterm'
+        if term_program == "iTerm.app":
+            return "iterm"
 
         # Ghostty detection (uses Kitty graphics protocol)
-        if term_program == 'ghostty' or 'ghostty' in term:
-            return 'kitty'
+        if term_program == "ghostty" or "ghostty" in term:
+            return "kitty"
 
         # Kitty detection (heuristic)
-        if 'kitty' in term or term == 'xterm-kitty':
-            return 'kitty'
+        if "kitty" in term or term == "xterm-kitty":
+            return "kitty"
 
         # Sixel detection (heuristic; TERM doesn't guarantee sixel support)
-        if 'sixel' in term:
-            return 'sixel'
+        if "sixel" in term:
+            return "sixel"
 
         # Fallback to blocks for universal compatibility
-        return 'blocks'
+        return "blocks"
 
     @staticmethod
     def supports_inline_images() -> bool:
@@ -117,7 +123,7 @@ class TerminalCapabilities:
                   False if only block-mode rendering is available
         """
         protocol = TerminalCapabilities.detect_graphics_protocol()
-        return protocol in ('iterm', 'kitty', 'sixel')
+        return protocol in ("iterm", "kitty", "sixel")
 
 
 def check_viu_availability() -> bool:
@@ -147,7 +153,7 @@ def fail_viu_not_found() -> None:
     raise SystemExit(1)
 
 
-def get_viu_preview(image_path: Path, width: int, height: int = None) -> str:
+def get_viu_preview(image_path: Path, width: int, height: int | None = None) -> str:
     """Generate viu preview output for an image.
 
     Args:
@@ -169,7 +175,7 @@ def get_viu_preview(image_path: Path, width: int, height: int = None) -> str:
             ["viu", "-b", "-w", str(width), str(image_path)],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         logger.debug(f"viu completed with returncode={result.returncode}")
 
@@ -198,25 +204,26 @@ def get_viu_preview(image_path: Path, width: int, height: int = None) -> str:
 class ImageSelector:
     """Interactive image selector with two-pane TUI."""
 
-    def __init__(self, images: List[Path]):
+    def __init__(self, images: list[Path]):
         """Initialize image selector.
 
         Args:
             images: List of image paths to display
         """
         self.images = images
-        self.selected_indices = set()  # Set of selected image indices
+        self.selected_indices: set[int] = set()  # Set of selected image indices
         self.current_index = 0  # Currently highlighted image
         self.console = Console(color_system="truecolor", force_terminal=True)
         self._first_render = True  # Track first render for graphics protocol mode
-        self._image_cache = {}  # Cache for rendered image output: {image_path: output}
+        # Cache for rendered image output, keyed by "<mode>:<path>:<w>:<h>".
+        self._image_cache: dict[str, bytes | list[str]] = {}
         self._selections_locked = False  # Track if selections are locked
-        self._locked_indices = set()  # Store locked selection indices
+        self._locked_indices: set[int] = set()  # Store locked selection indices
         self._preview_executor = ThreadPoolExecutor(max_workers=4)
-        self._preview_futures = {}
+        self._preview_futures: dict[str, Future[bytes | list[str]]] = {}
         self._preview_lock = threading.Lock()
         self._preview_dirty = False
-        self._last_preview_key = None
+        self._last_preview_key: str | None = None
         self._last_preview_cached = False  # Whether last preview render was from cache
         self._notify_r, self._notify_w = os.pipe()
         os.set_blocking(self._notify_r, False)
@@ -226,7 +233,9 @@ class ImageSelector:
         except OSError:
             self._terminal_size = os.terminal_size((120, 40))
 
-    def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, mode: str) -> None:
+    def _schedule_preview(
+        self, cache_key: str, image_path: Path, width: int, height: int, mode: str
+    ) -> None:
         """Schedule preview rendering if not already cached or in flight."""
         if cache_key in self._image_cache:
             return
@@ -234,35 +243,31 @@ class ImageSelector:
             if cache_key in self._preview_futures:
                 return
             future = self._preview_executor.submit(
-                self._render_preview_output,
-                image_path,
-                width,
-                height,
-                mode
+                self._render_preview_output, image_path, width, height, mode
             )
             self._preview_futures[cache_key] = future
-        future.add_done_callback(lambda f, key=cache_key: self._store_preview_result(key, f))
+        future.add_done_callback(functools.partial(self._store_preview_result, cache_key))
 
-    def _store_preview_result(self, cache_key: str, future) -> None:
+    def _store_preview_result(self, cache_key: str, future: Future[Any]) -> None:
         """Store preview render result and mark UI dirty."""
         try:
             output = future.result()
         except Exception as e:
             if cache_key.startswith("graphics:"):
-                output = f"[Preview error: {e}]".encode('utf-8', errors='replace')
+                output = f"[Preview error: {e}]".encode("utf-8", errors="replace")
             else:
                 output = [f"[Preview error: {e}]"]
         with self._preview_lock:
             self._preview_futures.pop(cache_key, None)
             if output is not None:
                 if cache_key.startswith("graphics:") and isinstance(output, list):
-                    output = "\n".join(output).encode('utf-8', errors='replace')
+                    output = "\n".join(output).encode("utf-8", errors="replace")
                 if cache_key.startswith("blocks:") and isinstance(output, bytes):
-                    output = output.decode('utf-8', errors='replace').splitlines()
+                    output = output.decode("utf-8", errors="replace").splitlines()
                 self._image_cache[cache_key] = output
             self._preview_dirty = True
             try:
-                os.write(self._notify_w, b'\x00')
+                os.write(self._notify_w, b"\x00")
             except OSError:
                 pass
 
@@ -271,20 +276,19 @@ class ImageSelector:
         if mode == "graphics":
             result = subprocess.run(
                 ["viu", "-w", str(width), "-h", str(height), str(image_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5
+                capture_output=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout
-            error_msg = result.stderr.decode('utf-8', errors='replace').strip()
-            return f"[Preview error: {error_msg}]".encode('utf-8', errors='replace')
+            error_msg = result.stderr.decode("utf-8", errors="replace").strip()
+            return f"[Preview error: {error_msg}]".encode("utf-8", errors="replace")
 
         # Block mode: use in-process Pillow renderer (no subprocess overhead)
         return render_image_to_ansi(image_path, width, height)
 
     @staticmethod
-    def _loading_lines(width: int, height: int) -> List[str]:
+    def _loading_lines(width: int, height: int) -> list[str]:
         """Create a placeholder preview to avoid blocking on render."""
         if height <= 0:
             return ["[Loading preview...]"]
@@ -295,15 +299,15 @@ class ImageSelector:
     @staticmethod
     def _visible_len(text: str) -> int:
         """Calculate visible length of text excluding ANSI escape codes."""
-        return len(_ANSI_ESCAPE_RE.sub('', text))
+        return len(_ANSI_ESCAPE_RE.sub("", text))
 
     @staticmethod
     def _pad_line(text: str, width: int) -> str:
         """Pad text with spaces to a fixed visible width."""
-        visible = len(_ANSI_ESCAPE_RE.sub('', text))
-        return text + ' ' * max(0, width - visible)
+        visible = len(_ANSI_ESCAPE_RE.sub("", text))
+        return text + " " * max(0, width - visible)
 
-    def _build_file_list_lines(self, width: int) -> List[str]:
+    def _build_file_list_lines(self, width: int) -> list[str]:
         """Build file list display lines with direct ANSI formatting.
 
         Much faster than Rich Panel/Table/Console capture cycle.
@@ -323,7 +327,7 @@ class ImageSelector:
             checkbox = "[x]" if i in self.selected_indices else "[ ]"
             name = img.name
             if len(name) > max_name:
-                name = name[:max_name - 3] + "..."
+                name = name[: max_name - 3] + "..."
             if i == self.current_index:
                 lines.append(f" \033[1;36m{checkbox} \033[1;36m► {name}\033[0m")
             else:
@@ -333,17 +337,17 @@ class ImageSelector:
         lines.append(f" \033[2m{'─' * (width - 2)}\033[0m")
         cur_name = self.images[self.current_index].name
         if len(cur_name) > width - 12:
-            cur_name = cur_name[:width - 15] + "..."
+            cur_name = cur_name[: width - 15] + "..."
         lines.append(f" \033[36mCurrent: {cur_name}\033[0m")
         lines.append("")
 
         if self._selections_locked:
-            lines.append(f" \033[1;32m✓ Selections locked\033[0m")
+            lines.append(" \033[1;32m✓ Selections locked\033[0m")
             lines.append("")
-            lines.append(f" \033[2mn: Next Stage  Enter: Unlock  q/Esc: Cancel\033[0m")
+            lines.append(" \033[2mn: Next Stage  Enter: Unlock  q/Esc: Cancel\033[0m")
         else:
-            lines.append(f" \033[2m↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock\033[0m")
-            lines.append(f" \033[2mq/Esc: Cancel\033[0m")
+            lines.append(" \033[2m↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock\033[0m")
+            lines.append(" \033[2mq/Esc: Cancel\033[0m")
 
         lines.append("")
         return lines
@@ -361,7 +365,7 @@ class ImageSelector:
         protocol = self._protocol
         terminal_size = self._terminal_size
 
-        if protocol in ('iterm', 'kitty', 'ghostty', 'sixel'):
+        if protocol in ("iterm", "kitty", "ghostty", "sixel"):
             # Graphics protocol dimensions
             terminal_width = terminal_size.columns
             terminal_height = terminal_size.lines
@@ -406,7 +410,7 @@ class ImageSelector:
         if self.current_index < len(self.images) - 1:
             self.current_index += 1
 
-    def get_selected_images(self) -> List[Path]:
+    def get_selected_images(self) -> list[Path]:
         """Get list of selected image paths.
 
         Returns:
@@ -421,7 +425,9 @@ class ImageSelector:
         Returns:
             Panel containing the file list
         """
-        logger.debug(f"create_file_list_panel: {len(self.images)} images, current={self.current_index}")
+        logger.debug(
+            f"create_file_list_panel: {len(self.images)} images, current={self.current_index}"
+        )
 
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column("checkbox", width=3)
@@ -493,10 +499,10 @@ class ImageSelector:
 
         # Anti-flicker: only clear screen on first render
         if self._first_render:
-            parts.append('\033[2J\033[H')
+            parts.append("\033[2J\033[H")
             self._first_render = False
         else:
-            parts.append('\033[H')
+            parts.append("\033[H")
 
         current_image = self.images[self.current_index]
         self._terminal_size = os.get_terminal_size()
@@ -510,15 +516,22 @@ class ImageSelector:
         # Determine if preview needs updating
         cache_key = f"blocks:{current_image}:{image_width}:{image_height}"
         cache_hit = cache_key in self._image_cache
-        preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
+        preview_changed = (cache_key != self._last_preview_key) or (
+            cache_hit and not self._last_preview_cached
+        )
 
+        viu_lines: list[str] | None
         if preview_changed:
             self._last_preview_key = cache_key
             self._last_preview_cached = cache_hit
             if cache_hit:
-                viu_lines = self._image_cache[cache_key]
+                cached = self._image_cache[cache_key]
+                assert isinstance(cached, list)  # a blocks: key always holds lines
+                viu_lines = cached
             elif check_viu_availability():
-                self._schedule_preview(cache_key, current_image, image_width, image_height, "blocks")
+                self._schedule_preview(
+                    cache_key, current_image, image_width, image_height, "blocks"
+                )
                 viu_lines = self._loading_lines(image_width, image_height)
             else:
                 viu_lines = []
@@ -530,18 +543,18 @@ class ImageSelector:
 
         # Write file list (always, padded to overwrite stale content)
         for row, line in enumerate(file_list_lines):
-            parts.append(f'\033[{row + 1};{file_list_column}H')
+            parts.append(f"\033[{row + 1};{file_list_column}H")
             parts.append(self._pad_line(line, file_list_width))
 
         # Write preview (only when changed)
         if viu_lines is not None:
             for row in range(image_height):
-                parts.append(f'\033[{row + 1};{image_column}H')
+                parts.append(f"\033[{row + 1};{image_column}H")
                 if row < len(viu_lines):
                     parts.append(viu_lines[row])
-                parts.append('\033[K')
+                parts.append("\033[K")
 
-        sys.stdout.write(''.join(parts))
+        sys.stdout.write("".join(parts))
         sys.stdout.flush()
         self._trigger_preload()
 
@@ -569,24 +582,26 @@ class ImageSelector:
         image_height = terminal_height - 2
 
         if self._first_render:
-            parts.append('\033[2J\033[H')
+            parts.append("\033[2J\033[H")
             self._first_render = False
         else:
-            parts.append('\033[H')
+            parts.append("\033[H")
 
         # Build file list (fast direct ANSI, no Rich)
         file_list_lines = self._build_file_list_lines(file_list_width)
 
         # Write file list padded to fixed width (overwrites stale content)
         for row, line in enumerate(file_list_lines):
-            parts.append(f'\033[{row + 1};1H')
+            parts.append(f"\033[{row + 1};1H")
             parts.append(self._pad_line(line, file_list_width))
 
         # Determine if preview needs updating
         current_image = self.images[self.current_index]
         cache_key = f"graphics:{current_image}:{image_width}:{image_height}"
         cache_hit = cache_key in self._image_cache
-        preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
+        preview_changed = (cache_key != self._last_preview_key) or (
+            cache_hit and not self._last_preview_cached
+        )
 
         # Binary preview data to write after flushing text buffer
         binary_preview = None
@@ -595,17 +610,19 @@ class ImageSelector:
             self._last_preview_key = cache_key
             self._last_preview_cached = cache_hit
 
-            parts.append(f'\033[1;{image_column}H')
+            parts.append(f"\033[1;{image_column}H")
 
             if cache_hit:
                 # Binary data must be written separately after text flush
                 binary_preview = self._image_cache[cache_key]
             else:
-                self._schedule_preview(cache_key, current_image, image_width, image_height, "graphics")
+                self._schedule_preview(
+                    cache_key, current_image, image_width, image_height, "graphics"
+                )
                 parts.append("[Loading preview...]")
 
         # Flush all text output in a single write
-        sys.stdout.write(''.join(parts))
+        sys.stdout.write("".join(parts))
         sys.stdout.flush()
 
         # Write binary preview data separately (can't join with strings)
@@ -640,14 +657,14 @@ class ImageSelector:
         """
         protocol = self._protocol
 
-        if protocol in ('iterm', 'kitty', 'sixel'):
+        if protocol in ("iterm", "kitty", "sixel"):
             # Graphics protocol path - always full render
             self.render_with_graphics_protocol()
         else:
             # Block mode path - supports partial rendering
             self.render_with_blocks(full_render=full_render)
 
-    def run(self) -> Optional[List[Path]]:
+    def run(self) -> list[Path] | None:
         """Run the interactive selector.
 
         Returns:
@@ -657,8 +674,8 @@ class ImageSelector:
             SystemExit: If user cancels (q/Escape)
         """
         # Import here to avoid issues if not in interactive terminal
-        import tty
         import termios
+        import tty
 
         # Check viu availability
         if not check_viu_availability():
@@ -675,7 +692,7 @@ class ImageSelector:
             tty.setraw(fd)
 
             # Hide cursor
-            sys.stdout.write('\033[?25l')
+            sys.stdout.write("\033[?25l")
             sys.stdout.flush()
 
             # Pre-load first few images on startup
@@ -712,10 +729,10 @@ class ImageSelector:
                     return None
 
                 # Handle other keys
-                elif key == ' ':  # Spacebar
+                elif key == " ":  # Spacebar
                     logger.debug("Space pressed")
                     self.toggle_selection()
-                elif key == '\r' or key == '\n':  # Enter
+                elif key == "\r" or key == "\n":  # Enter
                     logger.info("Enter pressed")
                     if not self._selections_locked:
                         # Lock the selections
@@ -732,17 +749,17 @@ class ImageSelector:
                         self._locked_indices = set()
                         logger.info("Selections unlocked")
                     # Don't return - stay in the loop
-                elif key in ('y', 'Y', 'x', 'X'):
+                elif key in ("y", "Y", "x", "X"):
                     # Just mark the image, don't proceed
                     logger.info(f"'{key}' pressed - toggling selection")
                     self.toggle_selection()
-                elif key == 'n' or key == 'N':
+                elif key == "n" or key == "N":
                     if not self._selections_locked:
                         logger.info("'n' pressed but selections not locked - ignoring")
                         continue
                     logger.info("'n' pressed - proceeding to next stage")
                     return self.get_selected_images()
-                elif key == 'a' or key == 'A':
+                elif key == "a" or key == "A":
                     # Toggle select all
                     logger.info("'a' pressed - toggling select all")
                     if len(self.selected_indices) == len(self.images):
@@ -754,10 +771,10 @@ class ImageSelector:
                         self.selected_indices = set(range(len(self.images)))
                         logger.info(f"Selected all {len(self.images)} images")
                     # Don't return - let user confirm with Enter
-                elif key == 'q' or key == 'Q':  # Quit
+                elif key == "q" or key == "Q":  # Quit
                     logger.info("Q pressed, exiting")
                     return None
-                elif key == '\x03':  # Ctrl+C
+                elif key == "\x03":  # Ctrl+C
                     logger.info("Ctrl+C pressed")
                     raise KeyboardInterrupt
 
@@ -766,8 +783,8 @@ class ImageSelector:
 
         finally:
             # Restore terminal settings
-            sys.stdout.write('\033[?25h')  # Show cursor
-            sys.stdout.write('\033[2J\033[H')  # Clear screen
+            sys.stdout.write("\033[?25h")  # Show cursor
+            sys.stdout.write("\033[2J\033[H")  # Clear screen
             sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             try:
@@ -781,7 +798,9 @@ class ImageSelector:
                 pass
 
 
-def show_processing_config(locked_images: List[Path], config: dict) -> dict:
+def show_processing_config(
+    locked_images: list[Path], config: dict[str, Any]
+) -> dict[str, Any] | None:
     """Show processing configuration screen for locked images.
 
     Args:
@@ -791,19 +810,19 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
     Returns:
         Processing configuration dict with user's choices
     """
-    import tty
     import termios
+    import tty
 
     console = Console()
 
     # Available output formats
-    AVAILABLE_FORMATS = ['JPEG', 'PNG', 'WEBP']
+    AVAILABLE_FORMATS = ["JPEG", "PNG", "WEBP"]
 
     # Configuration options with defaults
-    options = {
-        'resize': True,  # Apply size optimization
-        'preserve_exif': True,  # Preserve EXIF data
-        'output_format': 'JPEG',  # Output format (cycles through AVAILABLE_FORMATS)
+    options: dict[str, Any] = {
+        "resize": True,  # Apply size optimization
+        "preserve_exif": True,  # Preserve EXIF data
+        "output_format": "JPEG",  # Output format (cycles through AVAILABLE_FORMATS)
     }
 
     current_option = 0  # Currently highlighted option
@@ -820,7 +839,9 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         # Header
         header = Text()
         header.append("Processing Configuration\n", style="bold cyan")
-        header.append(f"Configure processing for {len(locked_images)} locked image(s)\n", style="dim")
+        header.append(
+            f"Configure processing for {len(locked_images)} locked image(s)\n", style="dim"
+        )
         console.print(Panel(header, border_style="cyan"))
         console.print()
 
@@ -832,61 +853,56 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         table.add_column("Value", justify="right")
 
         # Resize option
-        resize_checkbox = "[x]" if options['resize'] else "[ ]"
+        resize_checkbox = "[x]" if options["resize"] else "[ ]"
         if current_option == 0:
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Resize images", style="bold cyan"),
                 Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB", style="cyan"),
-                Text(resize_checkbox, style="bold cyan")
+                Text(resize_checkbox, style="bold cyan"),
             )
         else:
             table.add_row(
                 Text(""),
                 Text("Resize images"),
                 Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB"),
-                Text(resize_checkbox)
+                Text(resize_checkbox),
             )
 
         # EXIF preservation option
-        exif_checkbox = "[x]" if options['preserve_exif'] else "[ ]"
+        exif_checkbox = "[x]" if options["preserve_exif"] else "[ ]"
         if current_option == 1:
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Preserve EXIF data", style="bold cyan"),
                 Text("Keep camera, date, GPS info", style="cyan"),
-                Text(exif_checkbox, style="bold cyan")
+                Text(exif_checkbox, style="bold cyan"),
             )
         else:
             table.add_row(
                 Text(""),
                 Text("Preserve EXIF data"),
                 Text("Keep camera, date, GPS info"),
-                Text(exif_checkbox)
+                Text(exif_checkbox),
             )
 
         # Output format option
-        format_value = options['output_format']
+        format_value = options["output_format"]
         format_desc = {
-            'JPEG': 'Lossy compression, smallest size',
-            'PNG': 'Lossless, larger size',
-            'WEBP': 'Modern, balanced size/quality'
-        }.get(format_value, '')
+            "JPEG": "Lossy compression, smallest size",
+            "PNG": "Lossless, larger size",
+            "WEBP": "Modern, balanced size/quality",
+        }.get(format_value, "")
 
         if current_option == 2:
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Output format", style="bold cyan"),
                 Text(format_desc, style="cyan"),
-                Text(format_value, style="bold cyan")
+                Text(format_value, style="bold cyan"),
             )
         else:
-            table.add_row(
-                Text(""),
-                Text("Output format"),
-                Text(format_desc),
-                Text(format_value)
-            )
+            table.add_row(Text(""), Text("Output format"), Text(format_desc), Text(format_value))
 
         # Display table in panel
         console.print(Panel(table, title="Processing Options", border_style="blue"))
@@ -906,7 +922,7 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
         tty.setraw(fd)
 
         # Hide cursor
-        sys.stdout.write('\033[?25l')
+        sys.stdout.write("\033[?25l")
         sys.stdout.flush()
 
         # Initial render
@@ -917,48 +933,48 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
             char = sys.stdin.read(1)
 
             # Handle escape sequences (arrow keys)
-            if char == '\x1b':  # ESC
+            if char == "\x1b":  # ESC
                 next_char = sys.stdin.read(1)
-                if next_char == '[':
+                if next_char == "[":
                     arrow = sys.stdin.read(1)
-                    if arrow == 'A':  # Up arrow
+                    if arrow == "A":  # Up arrow
                         current_option = max(0, current_option - 1)
-                    elif arrow == 'B':  # Down arrow
+                    elif arrow == "B":  # Down arrow
                         current_option = min(len(option_keys) - 1, current_option + 1)
                 else:
                     # Escape key pressed (without arrow)
                     return None
 
             # Handle other keys
-            elif char == ' ':  # Spacebar - toggle/cycle current option
+            elif char == " ":  # Spacebar - toggle/cycle current option
                 option_key = option_keys[current_option]
-                if option_key == 'output_format':
+                if option_key == "output_format":
                     # Cycle through available formats
-                    current_format = options['output_format']
+                    current_format = options["output_format"]
                     current_index = AVAILABLE_FORMATS.index(current_format)
                     next_index = (current_index + 1) % len(AVAILABLE_FORMATS)
-                    options['output_format'] = AVAILABLE_FORMATS[next_index]
+                    options["output_format"] = AVAILABLE_FORMATS[next_index]
                 else:
                     # Toggle boolean option
                     options[option_key] = not options[option_key]
 
-            elif char == 'y' or char == 'Y':  # Y - confirm
+            elif char == "y" or char == "Y":  # Y - confirm
                 # Build result dictionary
                 result = {
-                    'resize': options['resize'],
-                    'target_size_kb': config.get('target_size_kb', 400),
-                    'preserve_exif': options['preserve_exif'],
-                    'output_format': options['output_format'],
+                    "resize": options["resize"],
+                    "target_size_kb": config.get("target_size_kb", 400),
+                    "preserve_exif": options["preserve_exif"],
+                    "output_format": options["output_format"],
                 }
                 return result
 
-            elif char == 'b' or char == 'B':  # Go back
+            elif char == "b" or char == "B":  # Go back
                 return None
 
-            elif char == 'q' or char == 'Q':  # Quit
+            elif char == "q" or char == "Q":  # Quit
                 return None
 
-            elif char == '\x03':  # Ctrl+C
+            elif char == "\x03":  # Ctrl+C
                 raise KeyboardInterrupt
 
             # Redraw screen
@@ -966,12 +982,12 @@ def show_processing_config(locked_images: List[Path], config: dict) -> dict:
 
     finally:
         # Restore terminal settings
-        sys.stdout.write('\033[?25h')  # Show cursor
+        sys.stdout.write("\033[?25h")  # Show cursor
         sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
-def select_images(images: List[Path]) -> List[Path]:
+def select_images(images: list[Path]) -> list[Path]:
     """Interactive image selection with TUI.
 
     Args:
@@ -1010,4 +1026,4 @@ def select_images(images: List[Path]) -> List[Path]:
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt caught")
         print("\nCancelled by user")
-        raise SystemExit(1)
+        raise SystemExit(1) from None

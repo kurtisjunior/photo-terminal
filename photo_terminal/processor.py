@@ -9,7 +9,6 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
 
 from photo_terminal.optimizer import optimize_image
 
@@ -27,32 +26,35 @@ class ProcessedImage:
         warnings: List of warning messages from optimization
         upload_filename: Optional custom filename for upload (e.g., with numeric prefix)
     """
+
     original_path: Path
     temp_path: Path
     original_size: int
     final_size: int
     quality_used: int
-    warnings: List[str]
-    upload_filename: str = None
+    warnings: list[str]
+    upload_filename: str | None = None
 
 
 class ProcessingError(Exception):
     """Raised when image processing fails."""
+
     pass
 
 
 class InsufficientDiskSpaceError(Exception):
     """Raised when there is not enough disk space for processing."""
+
     pass
 
 
 def process_images(
-    images: List[Path],
+    images: list[Path],
     target_size_kb: int = 400,
-    output_format: str = 'JPEG',
+    output_format: str = "JPEG",
     max_dimension: int = 1920,
-    filename_map: dict = None
-) -> Tuple[tempfile.TemporaryDirectory, List[ProcessedImage]]:
+    filename_map: dict[Path, str] | None = None,
+) -> tuple[tempfile.TemporaryDirectory, list[ProcessedImage]]:
     """Process multiple images with optimization and save to temp directory.
 
     Creates a temporary directory, checks available disk space, then processes
@@ -87,15 +89,11 @@ def process_images(
 
     # Validate output format
     output_format = output_format.upper()
-    if output_format not in ('JPEG', 'PNG', 'WEBP'):
+    if output_format not in ("JPEG", "PNG", "WEBP"):
         raise ValueError(f"Unsupported output format: {output_format}. Must be JPEG, PNG, or WEBP")
 
     # Determine file extension for output format
-    format_extensions = {
-        'JPEG': '.jpg',
-        'PNG': '.png',
-        'WEBP': '.webp'
-    }
+    format_extensions = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
     output_extension = format_extensions[output_format]
 
     # Create temporary directory
@@ -129,25 +127,25 @@ def process_images(
 
             try:
                 # Optimize image (with resizing if needed)
-                result = optimize_image(image_path, output_path, target_size_kb, output_format, max_dimension)
+                result = optimize_image(
+                    image_path, output_path, target_size_kb, output_format, max_dimension
+                )
 
                 # Create ProcessedImage metadata
                 processed = ProcessedImage(
                     original_path=image_path,
                     temp_path=output_path,
-                    original_size=result['original_size'],
-                    final_size=result['final_size'],
-                    quality_used=result['quality_used'],
-                    warnings=result['warnings'],
-                    upload_filename=upload_filename
+                    original_size=result["original_size"],
+                    final_size=result["final_size"],
+                    quality_used=result["quality_used"],
+                    warnings=result["warnings"],
+                    upload_filename=upload_filename,
                 )
                 processed_images.append(processed)
 
             except Exception as e:
                 # Fail-fast: Include filename in error message
-                raise ProcessingError(
-                    f"Failed to process image '{image_path.name}': {e}"
-                ) from e
+                raise ProcessingError(f"Failed to process image '{image_path.name}': {e}") from e
 
         # Clear progress line after processing
         print("\033[2K\033[1G", end="", flush=True)  # Clear line and return to start
@@ -160,7 +158,7 @@ def process_images(
         raise
 
 
-def _check_disk_space(images: List[Path], temp_dir_path: Path) -> None:
+def _check_disk_space(images: list[Path], temp_dir_path: Path) -> None:
     """Check if there is sufficient disk space for processing.
 
     Estimates needed space as sum of original file sizes * 1.5 (safety margin)

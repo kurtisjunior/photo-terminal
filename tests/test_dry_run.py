@@ -1,22 +1,22 @@
 """Tests for dry-run mode."""
 
-import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 from PIL import Image
 
 from photo_terminal.dry_run import (
-    dry_run_upload,
-    _print_header,
     _print_files_report,
+    _print_header,
+    _print_s3_keys,
     _print_summary,
-    _print_s3_keys
+    dry_run_upload,
 )
 from photo_terminal.processor import ProcessedImage
 
-
 # Test fixtures
+
 
 @pytest.fixture
 def sample_images(tmp_path):
@@ -26,8 +26,8 @@ def sample_images(tmp_path):
         img_path = tmp_path / f"test_image_{i}.jpg"
 
         # Create a simple test image
-        img = Image.new('RGB', (800, 600), color=(100 + i * 50, 150, 200))
-        img.save(img_path, 'JPEG', quality=95)
+        img = Image.new("RGB", (800, 600), color=(100 + i * 50, 150, 200))
+        img.save(img_path, "JPEG", quality=95)
 
         images.append(img_path)
 
@@ -53,7 +53,7 @@ def sample_processed_images(tmp_path):
             original_size=5 * 1024 * 1024,  # 5 MB
             final_size=400 * 1024,  # 400 KB
             quality_used=85,
-            warnings=[]
+            warnings=[],
         )
         images.append(processed)
 
@@ -71,36 +71,39 @@ def mock_temp_dir(tmp_path):
 
 # Tests for dry_run_upload()
 
+
 def test_dry_run_upload_exits_with_zero(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run exits with code 0 after displaying report."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit) as exc_info:
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         # Should exit with 0 (success)
         assert exc_info.value.code == 0
 
 
-def test_dry_run_upload_displays_header(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_displays_header(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run displays header with target location and size."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -111,18 +114,20 @@ def test_dry_run_upload_displays_header(sample_images, sample_processed_images, 
         assert "Target size:     400 KB" in captured.out
 
 
-def test_dry_run_upload_with_empty_prefix(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_with_empty_prefix(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run with empty prefix (root)."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='',
+                bucket="test-bucket",
+                prefix="",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -133,34 +138,34 @@ def test_dry_run_upload_with_empty_prefix(sample_images, sample_processed_images
 
 def test_dry_run_upload_calls_processor(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run calls process_images with correct arguments."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=500,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         # Verify process_images called with correct arguments
-        mock_process.assert_called_once_with(sample_images, 500, 'JPEG')
+        mock_process.assert_called_once_with(sample_images, 500, "JPEG")
 
 
 def test_dry_run_upload_cleans_up_temp_files(sample_images, sample_processed_images, mock_temp_dir):
     """Test dry-run cleans up temp files after displaying report."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         # Verify cleanup was called
@@ -169,35 +174,37 @@ def test_dry_run_upload_cleans_up_temp_files(sample_images, sample_processed_ima
 
 def test_dry_run_upload_cleans_up_on_error(sample_images, mock_temp_dir):
     """Test dry-run cleans up temp files even when processing fails."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         # Simulate processing error
         mock_process.side_effect = Exception("Processing failed")
 
         with pytest.raises(SystemExit) as exc_info:
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         # Should exit with error code
         assert exc_info.value.code == 1
 
 
-def test_dry_run_upload_displays_file_report(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_displays_file_report(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run displays file-by-file report."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -213,18 +220,20 @@ def test_dry_run_upload_displays_file_report(sample_images, sample_processed_ima
             assert "Reduction:" in captured.out
 
 
-def test_dry_run_upload_displays_summary(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_displays_summary(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run displays summary statistics."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -237,18 +246,20 @@ def test_dry_run_upload_displays_summary(sample_images, sample_processed_images,
         assert "Total reduction:" in captured.out
 
 
-def test_dry_run_upload_displays_s3_keys(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_displays_s3_keys(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run displays S3 keys that would be created."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -262,18 +273,20 @@ def test_dry_run_upload_displays_s3_keys(sample_images, sample_processed_images,
             assert expected_key in captured.out
 
 
-def test_dry_run_upload_displays_completion_message(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_displays_completion_message(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run displays completion message."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -286,8 +299,8 @@ def test_dry_run_upload_shows_warnings(tmp_path, mock_temp_dir, capsys):
     """Test dry-run displays warnings from optimizer."""
     # Create image with warning
     img_path = tmp_path / "test.jpg"
-    img = Image.new('RGB', (800, 600), color=(100, 150, 200))
-    img.save(img_path, 'JPEG', quality=95)
+    img = Image.new("RGB", (800, 600), color=(100, 150, 200))
+    img.save(img_path, "JPEG", quality=95)
 
     # Create processed image with warning
     temp_file = tmp_path / "processed.jpg"
@@ -299,19 +312,19 @@ def test_dry_run_upload_shows_warnings(tmp_path, mock_temp_dir, capsys):
         original_size=5 * 1024 * 1024,
         final_size=450 * 1024,
         quality_used=60,
-        warnings=['target_size_not_reached: Could not reach target size']
+        warnings=["target_size_not_reached: Could not reach target size"],
     )
 
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, [processed_with_warning])
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=[img_path],
-                bucket='test-bucket',
-                prefix='japan',
+                bucket="test-bucket",
+                prefix="japan",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -333,19 +346,19 @@ def test_dry_run_upload_single_file(sample_images, mock_temp_dir, capsys):
         original_size=3 * 1024 * 1024,  # 3 MB
         final_size=400 * 1024,  # 400 KB
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, [single_processed])
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=[sample_images[0]],
-                bucket='test-bucket',
-                prefix='photos',
+                bucket="test-bucket",
+                prefix="photos",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -355,18 +368,20 @@ def test_dry_run_upload_single_file(sample_images, mock_temp_dir, capsys):
         assert "Total files:      1" in captured.out
 
 
-def test_dry_run_upload_processing_feedback(sample_images, sample_processed_images, mock_temp_dir, capsys):
+def test_dry_run_upload_processing_feedback(
+    sample_images, sample_processed_images, mock_temp_dir, capsys
+):
     """Test dry-run shows processing feedback."""
-    with patch('photo_terminal.dry_run.process_images') as mock_process:
+    with patch("photo_terminal.dry_run.process_images") as mock_process:
         mock_process.return_value = (mock_temp_dir, sample_processed_images)
 
         with pytest.raises(SystemExit):
             dry_run_upload(
                 images=sample_images,
-                bucket='test-bucket',
-                prefix='japan/tokyo',
+                bucket="test-bucket",
+                prefix="japan/tokyo",
                 target_size_kb=400,
-                aws_profile='test-profile'
+                aws_profile="test-profile",
             )
 
         captured = capsys.readouterr()
@@ -377,9 +392,10 @@ def test_dry_run_upload_processing_feedback(sample_images, sample_processed_imag
 
 # Tests for _print_header()
 
+
 def test_print_header_with_prefix(capsys):
     """Test header with prefix."""
-    _print_header('test-bucket', 'japan/tokyo', 400)
+    _print_header("test-bucket", "japan/tokyo", 400)
 
     captured = capsys.readouterr()
 
@@ -390,7 +406,7 @@ def test_print_header_with_prefix(capsys):
 
 def test_print_header_without_prefix(capsys):
     """Test header without prefix (root)."""
-    _print_header('test-bucket', '', 500)
+    _print_header("test-bucket", "", 500)
 
     captured = capsys.readouterr()
 
@@ -400,7 +416,7 @@ def test_print_header_without_prefix(capsys):
 
 def test_print_header_format(capsys):
     """Test header formatting."""
-    _print_header('my-bucket', 'photos', 300)
+    _print_header("my-bucket", "photos", 300)
 
     captured = capsys.readouterr()
 
@@ -409,6 +425,7 @@ def test_print_header_format(capsys):
 
 
 # Tests for _print_files_report()
+
 
 def test_print_files_report_single_file(sample_processed_images, capsys):
     """Test file report with single file."""
@@ -446,7 +463,7 @@ def test_print_files_report_size_formatting(tmp_path, capsys):
         original_size=5 * 1024 * 1024,  # 5 MB
         final_size=400 * 1024,  # 400 KB
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
     _print_files_report([processed])
@@ -470,7 +487,7 @@ def test_print_files_report_reduction_percentage(tmp_path, capsys):
         original_size=10 * 1024 * 1024,
         final_size=1 * 1024 * 1024,
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
     _print_files_report([processed])
@@ -492,7 +509,7 @@ def test_print_files_report_with_warnings(tmp_path, capsys):
         original_size=5 * 1024 * 1024,
         final_size=450 * 1024,
         quality_used=60,
-        warnings=['target_size_not_reached: Failed to reach target']
+        warnings=["target_size_not_reached: Failed to reach target"],
     )
 
     _print_files_report([processed])
@@ -506,6 +523,7 @@ def test_print_files_report_with_warnings(tmp_path, capsys):
 
 # Tests for _print_summary()
 
+
 def test_print_summary_single_file(tmp_path, capsys):
     """Test summary with single file."""
     temp_file = tmp_path / "test.jpg"
@@ -517,7 +535,7 @@ def test_print_summary_single_file(tmp_path, capsys):
         original_size=5 * 1024 * 1024,
         final_size=400 * 1024,
         quality_used=85,
-        warnings=[]
+        warnings=[],
     )
 
     _print_summary([processed])
@@ -574,9 +592,10 @@ def test_print_summary_format(sample_processed_images, capsys):
 
 # Tests for _print_s3_keys()
 
+
 def test_print_s3_keys_with_prefix(sample_processed_images, capsys):
     """Test S3 keys with prefix."""
-    _print_s3_keys(sample_processed_images, 'japan/tokyo')
+    _print_s3_keys(sample_processed_images, "japan/tokyo")
 
     captured = capsys.readouterr()
 
@@ -590,7 +609,7 @@ def test_print_s3_keys_with_prefix(sample_processed_images, capsys):
 
 def test_print_s3_keys_without_prefix(sample_processed_images, capsys):
     """Test S3 keys without prefix (root)."""
-    _print_s3_keys(sample_processed_images, '')
+    _print_s3_keys(sample_processed_images, "")
 
     captured = capsys.readouterr()
 
@@ -602,7 +621,7 @@ def test_print_s3_keys_without_prefix(sample_processed_images, capsys):
 
 def test_print_s3_keys_with_trailing_slash(sample_processed_images, capsys):
     """Test S3 keys with trailing slash in prefix."""
-    _print_s3_keys(sample_processed_images, 'japan/tokyo/')
+    _print_s3_keys(sample_processed_images, "japan/tokyo/")
 
     captured = capsys.readouterr()
 
@@ -614,7 +633,7 @@ def test_print_s3_keys_with_trailing_slash(sample_processed_images, capsys):
 
 def test_print_s3_keys_single_folder(sample_processed_images, capsys):
     """Test S3 keys with single folder prefix."""
-    _print_s3_keys(sample_processed_images, 'japan')
+    _print_s3_keys(sample_processed_images, "japan")
 
     captured = capsys.readouterr()
 
@@ -625,7 +644,7 @@ def test_print_s3_keys_single_folder(sample_processed_images, capsys):
 
 def test_print_s3_keys_deep_hierarchy(sample_processed_images, capsys):
     """Test S3 keys with deep folder hierarchy."""
-    _print_s3_keys(sample_processed_images, 'italy/trapani/2024')
+    _print_s3_keys(sample_processed_images, "italy/trapani/2024")
 
     captured = capsys.readouterr()
 
@@ -636,24 +655,25 @@ def test_print_s3_keys_deep_hierarchy(sample_processed_images, capsys):
 
 # Integration tests
 
+
 def test_dry_run_upload_integration(tmp_path, capsys):
     """Integration test with real image processing (no S3)."""
     # Create test images
     images = []
     for i in range(2):
         img_path = tmp_path / f"test_{i}.jpg"
-        img = Image.new('RGB', (1000, 800), color=(100, 150, 200))
-        img.save(img_path, 'JPEG', quality=95)
+        img = Image.new("RGB", (1000, 800), color=(100, 150, 200))
+        img.save(img_path, "JPEG", quality=95)
         images.append(img_path)
 
     # Run dry-run (should exit)
     with pytest.raises(SystemExit) as exc_info:
         dry_run_upload(
             images=images,
-            bucket='test-bucket',
-            prefix='photos',
+            bucket="test-bucket",
+            prefix="photos",
             target_size_kb=50,
-            aws_profile='test-profile'
+            aws_profile="test-profile",
         )
 
     # Should exit with success

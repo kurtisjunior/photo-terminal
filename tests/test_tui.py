@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -15,17 +14,6 @@ from photo_terminal.tui import (
     get_viu_preview,
     select_images,
 )
-
-
-@pytest.fixture
-def sample_images(tmp_path):
-    """Create sample image paths for testing."""
-    images = []
-    for i in range(3):
-        img_path = tmp_path / f"image{i}.jpg"
-        img_path.touch()
-        images.append(img_path)
-    return images
 
 
 class TestViuAvailability:
@@ -213,6 +201,7 @@ class TestImageSelector:
         # Should return a Panel now (simplified, no preview)
         assert layout is not None
         from rich.panel import Panel
+
         assert isinstance(layout, Panel)
 
     def test_create_file_list_panel(self, sample_images):
@@ -343,73 +332,73 @@ class TestNavigationLogic:
 class TestRenderDispatcher:
     """Tests for render_with_preview() dispatcher method."""
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='iterm')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="iterm")
     def test_render_dispatch_iterm(self, mock_detect, sample_images):
         """Test dispatcher calls render_with_graphics_protocol() for iTerm."""
         selector = ImageSelector(sample_images)
 
-        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+        with patch.object(selector, "render_with_graphics_protocol") as mock_graphics:
             selector.render_with_preview()
             mock_graphics.assert_called_once()
             mock_detect.assert_called_once()
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='kitty')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="kitty")
     def test_render_dispatch_kitty(self, mock_detect, sample_images):
         """Test dispatcher calls render_with_graphics_protocol() for Kitty."""
         selector = ImageSelector(sample_images)
 
-        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+        with patch.object(selector, "render_with_graphics_protocol") as mock_graphics:
             selector.render_with_preview()
             mock_graphics.assert_called_once()
             mock_detect.assert_called_once()
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='sixel')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="sixel")
     def test_render_dispatch_sixel(self, mock_detect, sample_images):
         """Test dispatcher calls render_with_graphics_protocol() for Sixel."""
         selector = ImageSelector(sample_images)
 
-        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+        with patch.object(selector, "render_with_graphics_protocol") as mock_graphics:
             selector.render_with_preview()
             mock_graphics.assert_called_once()
             mock_detect.assert_called_once()
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='blocks')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="blocks")
     def test_render_dispatch_blocks(self, mock_detect, sample_images):
         """Test dispatcher calls render_with_blocks() when no graphics protocol available."""
         selector = ImageSelector(sample_images)
 
-        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+        with patch.object(selector, "render_with_blocks") as mock_blocks:
             selector.render_with_preview()
             mock_blocks.assert_called_once()
             mock_detect.assert_called_once()
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='blocks')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="blocks")
     def test_render_dispatch_passes_full_render_to_blocks(self, mock_detect, sample_images):
         """Test that full_render parameter is passed correctly to render_with_blocks()."""
         selector = ImageSelector(sample_images)
 
         # Test with full_render=True
-        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+        with patch.object(selector, "render_with_blocks") as mock_blocks:
             selector.render_with_preview(full_render=True)
             mock_blocks.assert_called_once_with(full_render=True)
 
         # Test with full_render=False
-        with patch.object(selector, 'render_with_blocks') as mock_blocks:
+        with patch.object(selector, "render_with_blocks") as mock_blocks:
             selector.render_with_preview(full_render=False)
             mock_blocks.assert_called_once_with(full_render=False)
 
-    @patch.object(TerminalCapabilities, 'detect_graphics_protocol', return_value='iterm')
+    @patch.object(TerminalCapabilities, "detect_graphics_protocol", return_value="iterm")
     def test_render_dispatch_ignores_full_render_for_graphics(self, mock_detect, sample_images):
         """Test that full_render parameter is ignored for graphics protocol path."""
         selector = ImageSelector(sample_images)
 
         # Graphics protocol method doesn't take parameters, so verify it's called
         # without any arguments regardless of full_render value
-        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+        with patch.object(selector, "render_with_graphics_protocol") as mock_graphics:
             selector.render_with_preview(full_render=True)
             mock_graphics.assert_called_once_with()
 
-        with patch.object(selector, 'render_with_graphics_protocol') as mock_graphics:
+        with patch.object(selector, "render_with_graphics_protocol") as mock_graphics:
             selector.render_with_preview(full_render=False)
             mock_graphics.assert_called_once_with()
 
@@ -426,13 +415,13 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 2}
 
         # Mock stdin: 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify all three images are selected (0, 2 were already selected, 1 was toggled on)
@@ -448,13 +437,13 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 1, 2}
 
         # Press 'y' to toggle off index 2, then Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify img3 (index 2) was toggled off, leaving 0 and 1
@@ -469,13 +458,13 @@ class TestKeyboardSelection:
         assert len(selector.selected_indices) == 0
 
         # Press 'a' to select all, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify all images are selected
@@ -491,13 +480,13 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 1, 2}
 
         # Press 'a' (should deselect all), then 'q' to quit
-        with patch('sys.stdin.read', side_effect=['a', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["a", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify all selections are cleared
@@ -512,13 +501,13 @@ class TestKeyboardSelection:
         selector.selected_indices = {0}
 
         # Press 'a' to select all, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify all images are now selected
@@ -530,13 +519,13 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
 
         # Press 'a' then 'q' (not Enter)
-        with patch('sys.stdin.read', side_effect=['a', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["a", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (quit) not the selected images
@@ -549,13 +538,13 @@ class TestKeyboardSelection:
 
         # Press spacebar twice (toggles on then off), then spacebar once more, then Enter to lock, 'n' to proceed
         # Net result: selected once
-        with patch('sys.stdin.read', side_effect=[' ', ' ', ' ', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=[" ", " ", " ", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Spacebar three times: on, off, on = selected
@@ -570,13 +559,13 @@ class TestKeyboardSelection:
         assert 0 not in selector.selected_indices
 
         # Toggle on with spacebar, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=[' ', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=[" ", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should have selected the first image
@@ -590,13 +579,13 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 2}
 
         # Press Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return the pre-selected images
@@ -608,13 +597,13 @@ class TestKeyboardSelection:
         selector.current_index = 0  # First image
 
         # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return only the first image
@@ -627,13 +616,13 @@ class TestKeyboardSelection:
         selector.current_index = len(sample_images) - 1  # Last image
 
         # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return only the last image
@@ -646,13 +635,13 @@ class TestKeyboardSelection:
         selector.current_index = 1
 
         # Press uppercase 'Y' to toggle, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['Y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["Y", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return only current image
@@ -663,13 +652,13 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
 
         # Press uppercase 'A' to select all, Enter to lock, 'n' to proceed
-        with patch('sys.stdin.read', side_effect=['A', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["A", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should select all images
@@ -681,113 +670,104 @@ class TestTerminalCapabilities:
 
     def test_detect_iterm2(self):
         """Test iTerm2 detection via TERM_PROGRAM environment variable."""
-        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+        with patch.dict(os.environ, {"TERM_PROGRAM": "iTerm.app"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "iterm"
 
     def test_detect_kitty_xterm_kitty(self):
         """Test Kitty detection via TERM='xterm-kitty'."""
-        with patch.dict(os.environ, {'TERM': 'xterm-kitty'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+        with patch.dict(os.environ, {"TERM": "xterm-kitty"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "kitty"
 
     def test_detect_kitty_term(self):
         """Test Kitty detection via TERM='kitty'."""
-        with patch.dict(os.environ, {'TERM': 'kitty'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+        with patch.dict(os.environ, {"TERM": "kitty"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "kitty"
 
     def test_detect_sixel(self):
         """Test Sixel detection via TERM containing 'sixel'."""
-        with patch.dict(os.environ, {'TERM': 'xterm-sixel'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
+        with patch.dict(os.environ, {"TERM": "xterm-sixel"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "sixel"
 
     def test_fallback_to_blocks(self):
         """Test fallback to blocks for standard terminals."""
-        with patch.dict(os.environ, {'TERM': 'xterm-256color'}, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "blocks"
 
     def test_tmux_forces_blocks_with_iterm(self):
         """Test that TMUX environment variable forces blocks even with iTerm2."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'TMUX': '/tmp/tmux-501/default,12345,0'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+        with patch.dict(
+            os.environ,
+            {"TERM_PROGRAM": "iTerm.app", "TMUX": "/tmp/tmux-501/default,12345,0"},
+            clear=True,
+        ):
+            assert TerminalCapabilities.detect_graphics_protocol() == "blocks"
 
     def test_screen_forces_blocks_with_kitty(self):
         """Test that STY environment variable (GNU screen) forces blocks even with Kitty."""
-        with patch.dict(os.environ, {
-            'TERM': 'xterm-kitty',
-            'STY': '12345.pts-0.hostname'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+        with patch.dict(
+            os.environ, {"TERM": "xterm-kitty", "STY": "12345.pts-0.hostname"}, clear=True
+        ):
+            assert TerminalCapabilities.detect_graphics_protocol() == "blocks"
 
     def test_supports_inline_images_true_iterm(self):
         """Test supports_inline_images returns True for iTerm2."""
-        with patch.dict(os.environ, {'TERM_PROGRAM': 'iTerm.app'}, clear=True):
+        with patch.dict(os.environ, {"TERM_PROGRAM": "iTerm.app"}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_true_kitty(self):
         """Test supports_inline_images returns True for Kitty."""
-        with patch.dict(os.environ, {'TERM': 'xterm-kitty'}, clear=True):
+        with patch.dict(os.environ, {"TERM": "xterm-kitty"}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_true_sixel(self):
         """Test supports_inline_images returns True for Sixel."""
-        with patch.dict(os.environ, {'TERM': 'xterm-sixel'}, clear=True):
+        with patch.dict(os.environ, {"TERM": "xterm-sixel"}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is True
 
     def test_supports_inline_images_false_blocks(self):
         """Test supports_inline_images returns False for block mode."""
-        with patch.dict(os.environ, {'TERM': 'xterm-256color'}, clear=True):
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
             assert TerminalCapabilities.supports_inline_images() is False
-
 
     def test_priority_order_iterm_over_kitty(self):
         """Test that iTerm2 detection takes priority when both indicators are present."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'iTerm.app',
-            'TERM': 'xterm-kitty'
-        }, clear=True):
+        with patch.dict(
+            os.environ, {"TERM_PROGRAM": "iTerm.app", "TERM": "xterm-kitty"}, clear=True
+        ):
             # iTerm2 should be detected first
-            assert TerminalCapabilities.detect_graphics_protocol() == 'iterm'
+            assert TerminalCapabilities.detect_graphics_protocol() == "iterm"
 
     def test_kitty_substring_detection(self):
         """Test that 'kitty' substring in TERM is detected."""
-        with patch.dict(os.environ, {
-            'TERM': 'something-kitty-variant'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+        with patch.dict(os.environ, {"TERM": "something-kitty-variant"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "kitty"
 
     def test_sixel_substring_detection(self):
         """Test that 'sixel' substring in TERM is detected."""
-        with patch.dict(os.environ, {
-            'TERM': 'mlterm-sixel'
-        }, clear=True):
-            assert TerminalCapabilities.detect_graphics_protocol() == 'sixel'
+        with patch.dict(os.environ, {"TERM": "mlterm-sixel"}, clear=True):
+            assert TerminalCapabilities.detect_graphics_protocol() == "sixel"
 
     def test_detect_ghostty_term_program(self):
         """Test Ghostty detection via TERM_PROGRAM='ghostty' should return 'kitty'."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'ghostty'
-        }, clear=True):
+        with patch.dict(os.environ, {"TERM_PROGRAM": "ghostty"}, clear=True):
             # Ghostty supports Kitty graphics protocol
-            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+            assert TerminalCapabilities.detect_graphics_protocol() == "kitty"
 
     def test_detect_ghostty_in_term(self):
         """Test Ghostty detection via TERM containing 'ghostty' should return 'kitty'."""
-        with patch.dict(os.environ, {
-            'TERM': 'xterm-ghostty'
-        }, clear=True):
+        with patch.dict(os.environ, {"TERM": "xterm-ghostty"}, clear=True):
             # Ghostty supports Kitty graphics protocol
-            assert TerminalCapabilities.detect_graphics_protocol() == 'kitty'
+            assert TerminalCapabilities.detect_graphics_protocol() == "kitty"
 
     def test_ghostty_with_multiplexer(self):
         """Test that TMUX forces blocks even with Ghostty."""
-        with patch.dict(os.environ, {
-            'TERM_PROGRAM': 'ghostty',
-            'TMUX': '/tmp/tmux-501/default,12345,0'
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {"TERM_PROGRAM": "ghostty", "TMUX": "/tmp/tmux-501/default,12345,0"},
+            clear=True,
+        ):
             # Multiplexers break graphics protocols
-            assert TerminalCapabilities.detect_graphics_protocol() == 'blocks'
+            assert TerminalCapabilities.detect_graphics_protocol() == "blocks"
 
 
 class TestMultiStageWorkflow:
@@ -798,13 +778,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark first two images, then lock, then proceed
-        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', ' ', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\x1b", "[", "B", " ", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return 2 selected images
@@ -819,13 +799,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Try to lock without selecting anything, then quit
-        with patch('sys.stdin.read', side_effect=['\r', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["\r", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (quit), lock should not have happened
@@ -838,13 +818,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark an image, try 'n' without locking, then quit
-        with patch('sys.stdin.read', side_effect=['y', 'n', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "n", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (quit), not proceed
@@ -856,13 +836,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark image, lock, unlock, lock again, proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "\r", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return selected image, and be locked at end
@@ -875,13 +855,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark first image, lock, mark second image, proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\x1b', '[', 'B', 'y', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "\x1b", "[", "B", "y", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should have both images selected (lock doesn't prevent changes in current implementation)
@@ -893,13 +873,15 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark image, lock, unlock, unmark image, mark different image, lock, proceed
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', 'y', '\x1b', '[', 'B', 'y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch(
+            "sys.stdin.read", side_effect=["y", "\r", "\r", "y", "\x1b", "[", "B", "y", "\r", "n"]
+        ):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should have only second image (first was toggled off)
@@ -912,13 +894,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark some images, then quit before locking
-        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', 'y', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\x1b", "[", "B", "y", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (cancelled)
@@ -930,13 +912,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark images, lock, then quit
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (cancelled)
@@ -948,13 +930,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Verify 'n' is ignored without lock
-        with patch('sys.stdin.read', side_effect=['y', 'n', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "n", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should successfully return (first 'n' ignored, lock happened, second 'n' proceeded)
@@ -966,13 +948,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark images, then press Escape (without arrow key following)
-        with patch('sys.stdin.read', side_effect=['y', '\x1b', 'x']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\x1b", "x"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return None (cancelled by Escape)
@@ -983,13 +965,15 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark, lock, navigate, verify lock persists
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\x1b', '[', 'B', '\x1b', '[', 'A', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch(
+            "sys.stdin.read", side_effect=["y", "\r", "\x1b", "[", "B", "\x1b", "[", "A", "n"]
+        ):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return selected images, lock should be active
@@ -1001,13 +985,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark, lock, proceed with uppercase N
-        with patch('sys.stdin.read', side_effect=['y', '\r', 'N']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "N"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should successfully return
@@ -1019,13 +1003,13 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark all three images, then lock, then proceed
-        with patch('sys.stdin.read', side_effect=['a', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Should return all images
@@ -1038,13 +1022,15 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark first and third images, lock
-        with patch('sys.stdin.read', side_effect=['y', '\x1b', '[', 'B', '\x1b', '[', 'B', 'y', '\r', 'n']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch(
+            "sys.stdin.read", side_effect=["y", "\x1b", "[", "B", "\x1b", "[", "B", "y", "\r", "n"]
+        ):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     result = selector.run()
 
         # Verify locked indices match selected indices
@@ -1056,14 +1042,14 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark, lock, unlock, quit
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\r', 'q']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
-                                    result = selector.run()
+        with patch("sys.stdin.read", side_effect=["y", "\r", "\r", "q"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
+                                    selector.run()
 
         # Verify unlocked state
         assert selector._selections_locked is False
@@ -1074,12 +1060,12 @@ class TestMultiStageWorkflow:
         selector = ImageSelector(sample_images)
 
         # Mark, lock, then Ctrl+C
-        with patch('sys.stdin.read', side_effect=['y', '\r', '\x03']):
-            with patch.object(selector, 'render_with_preview'):
-                with patch('photo_terminal.tui.check_viu_availability', return_value=True):
-                    with patch('sys.stdin.fileno', return_value=0):
-                        with patch('termios.tcgetattr', return_value=[]):
-                            with patch('termios.tcsetattr'):
-                                with patch('tty.setraw'):
+        with patch("sys.stdin.read", side_effect=["y", "\r", "\x03"]):
+            with patch.object(selector, "render_with_preview"):
+                with patch("photo_terminal.tui.check_viu_availability", return_value=True):
+                    with patch("sys.stdin.fileno", return_value=0):
+                        with patch("termios.tcgetattr", return_value=[]):
+                            with patch("termios.tcsetattr"):
+                                with patch("tty.setraw"):
                                     with pytest.raises(KeyboardInterrupt):
                                         selector.run()

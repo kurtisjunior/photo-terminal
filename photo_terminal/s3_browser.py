@@ -11,19 +11,16 @@ Provides a terminal interface for navigating S3 bucket structure:
 """
 
 import sys
-from pathlib import Path
-from typing import List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import (
+    BotoCoreError,
     ClientError,
+    EndpointConnectionError,
     NoCredentialsError,
     ProfileNotFound,
-    EndpointConnectionError,
-    BotoCoreError
 )
 from rich.console import Console
-from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -32,10 +29,11 @@ from rich.text import Text
 
 class S3AccessError(Exception):
     """Raised when S3 access validation fails."""
+
     pass
 
 
-def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
+def validate_s3_access(bucket: str, aws_profile: str | None) -> None:
     """Validate S3 access early to fail-fast on credential/permission issues.
 
     Args:
@@ -48,12 +46,12 @@ def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
     """
     try:
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-        s3_client = session.client('s3')
+        s3_client = session.client("s3")
 
         # Test ListBucket permission with minimal request
         s3_client.list_objects_v2(Bucket=bucket, MaxKeys=1)
 
-    except ProfileNotFound:
+    except ProfileNotFound as e:
         raise S3AccessError(
             f"AWS profile '{aws_profile}' not found.\n\n"
             f"Recommended: create a .env file with AWS_ACCESS_KEY_ID and\n"
@@ -61,9 +59,9 @@ def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
             f"Or configure AWS CLI with:\n"
             f"  aws configure --profile {aws_profile}\n\n"
             f"Or check your ~/.aws/credentials file."
-        )
+        ) from e
 
-    except NoCredentialsError:
+    except NoCredentialsError as e:
         raise S3AccessError(
             "AWS credentials not found.\n\n"
             "Recommended: create a .env file in the project root with:\n"
@@ -72,54 +70,52 @@ def validate_s3_access(bucket: str, aws_profile: Optional[str]) -> None:
             "(see .env.example; direnv loads it automatically).\n\n"
             "Or configure AWS CLI with:\n"
             "  aws configure --profile <profile-name>"
-        )
+        ) from e
 
     except ClientError as e:
-        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
 
-        if error_code == 'NoSuchBucket':
+        if error_code == "NoSuchBucket":
             raise S3AccessError(
                 f"S3 bucket '{bucket}' does not exist.\n\n"
                 f"Verify the bucket name in your configuration."
-            )
+            ) from e
 
-        elif error_code == 'AccessDenied' or error_code == 'Forbidden':
+        elif error_code == "AccessDenied" or error_code == "Forbidden":
             raise S3AccessError(
                 f"Access denied to S3 bucket '{bucket}'.\n\n"
                 f"Verify that:\n"
                 f"  1. AWS profile '{aws_profile}' has ListBucket permission\n"
                 f"  2. Bucket policy allows your IAM user/role access\n\n"
                 f"Error: {e.response.get('Error', {}).get('Message', str(e))}"
-            )
+            ) from e
 
         else:
             raise S3AccessError(
                 f"AWS error accessing bucket '{bucket}':\n"
                 f"Error code: {error_code}\n"
                 f"Message: {e.response.get('Error', {}).get('Message', str(e))}"
-            )
+            ) from e
 
     except EndpointConnectionError as e:
         raise S3AccessError(
             "Network error: Could not connect to AWS.\n\n"
             "Check your internet connection and try again.\n\n"
             f"Details: {e}"
-        )
+        ) from e
 
     except BotoCoreError as e:
         raise S3AccessError(
-            f"AWS SDK error: {e}\n\n"
-            "This may be a configuration issue. Check your AWS setup."
-        )
+            f"AWS SDK error: {e}\n\nThis may be a configuration issue. Check your AWS setup."
+        ) from e
 
     except Exception as e:
         raise S3AccessError(
-            f"Unexpected error accessing S3: {e}\n\n"
-            "Please check your AWS configuration."
-        )
+            f"Unexpected error accessing S3: {e}\n\nPlease check your AWS configuration."
+        ) from e
 
 
-def list_s3_folders(bucket: str, aws_profile: Optional[str], prefix: str = "") -> List[str]:
+def list_s3_folders(bucket: str, aws_profile: str | None, prefix: str = "") -> list[str]:
     """List folders (CommonPrefixes) at a given S3 prefix level.
 
     Args:
@@ -136,35 +132,31 @@ def list_s3_folders(bucket: str, aws_profile: Optional[str], prefix: str = "") -
     """
     try:
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-        s3_client = session.client('s3')
+        s3_client = session.client("s3")
 
         # Use delimiter='/' to get folder-like structure
-        response = s3_client.list_objects_v2(
-            Bucket=bucket,
-            Prefix=prefix,
-            Delimiter='/'
-        )
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
 
         # Extract CommonPrefixes (folders)
         folders = []
-        for common_prefix in response.get('CommonPrefixes', []):
-            full_prefix = common_prefix['Prefix']
+        for common_prefix in response.get("CommonPrefixes", []):
+            full_prefix = common_prefix["Prefix"]
 
             # Extract just the folder name (last segment before trailing /)
             # e.g., "japan/tokyo/" -> "tokyo"
-            folder_name = full_prefix.rstrip('/').split('/')[-1]
+            folder_name = full_prefix.rstrip("/").split("/")[-1]
             folders.append(folder_name)
 
         return sorted(folders)
 
     except Exception as e:
-        raise S3AccessError(f"Error listing S3 folders: {e}")
+        raise S3AccessError(f"Error listing S3 folders: {e}") from e
 
 
 class S3FolderBrowser:
     """Interactive S3 folder browser with hierarchy navigation."""
 
-    def __init__(self, bucket: str, aws_profile: Optional[str]):
+    def __init__(self, bucket: str, aws_profile: str | None):
         """Initialize S3 folder browser.
 
         Args:
@@ -175,7 +167,7 @@ class S3FolderBrowser:
         self.bucket = bucket
         self.aws_profile = aws_profile
         self.current_prefix = ""  # Current S3 prefix (e.g., "japan/tokyo/")
-        self.folders = []  # Folders at current level
+        self.folders: list[str] = []  # Folders at current level
         self.current_index = 0  # Currently highlighted item
         self.console = Console()
 
@@ -193,10 +185,10 @@ class S3FolderBrowser:
             return "Root"
 
         # Split prefix into parts
-        parts = self.current_prefix.rstrip('/').split('/')
+        parts = self.current_prefix.rstrip("/").split("/")
         return "Root / " + " / ".join(parts)
 
-    def get_menu_items(self) -> List[str]:
+    def get_menu_items(self) -> list[str]:
         """Get menu items for current level.
 
         Returns:
@@ -229,7 +221,7 @@ class S3FolderBrowser:
         if self.current_index < len(menu_items) - 1:
             self.current_index += 1
 
-    def handle_selection(self) -> Optional[str]:
+    def handle_selection(self) -> str | None:
         """Handle Enter key on current selection.
 
         Returns:
@@ -246,9 +238,9 @@ class S3FolderBrowser:
             # Go up one level
             if self.current_prefix:
                 # Remove last segment
-                parts = self.current_prefix.rstrip('/').split('/')
+                parts = self.current_prefix.rstrip("/").split("/")
                 if len(parts) > 1:
-                    self.current_prefix = '/'.join(parts[:-1]) + '/'
+                    self.current_prefix = "/".join(parts[:-1]) + "/"
                 else:
                     self.current_prefix = ""
                 self.load_folders()
@@ -256,7 +248,7 @@ class S3FolderBrowser:
 
         else:
             # User selected a folder - drill into it
-            self.current_prefix = self.current_prefix + selected + '/'
+            self.current_prefix = self.current_prefix + selected + "/"
             self.load_folders()
             return None
 
@@ -299,6 +291,7 @@ class S3FolderBrowser:
         title = f"S3 Browser: {breadcrumb}"
 
         from rich.console import Group
+
         return Panel(Group(table, controls_text), title=title, border_style="blue")
 
     def run(self) -> str:
@@ -311,8 +304,8 @@ class S3FolderBrowser:
             SystemExit: If user cancels
         """
         # Import here to avoid issues if not in interactive terminal
-        import tty
         import termios
+        import tty
 
         # Load initial folder list
         self.load_folders()
@@ -331,29 +324,29 @@ class S3FolderBrowser:
                     char = sys.stdin.read(1)
 
                     # Handle escape sequences (arrow keys)
-                    if char == '\x1b':  # ESC
+                    if char == "\x1b":  # ESC
                         next_char = sys.stdin.read(1)
-                        if next_char == '[':
+                        if next_char == "[":
                             arrow = sys.stdin.read(1)
-                            if arrow == 'A':  # Up arrow
+                            if arrow == "A":  # Up arrow
                                 self.move_up()
-                            elif arrow == 'B':  # Down arrow
+                            elif arrow == "B":  # Down arrow
                                 self.move_down()
                         else:
                             # Escape key pressed (without arrow)
                             raise SystemExit(1)
 
                     # Handle other keys
-                    elif char == '\r' or char == '\n':  # Enter
+                    elif char == "\r" or char == "\n":  # Enter
                         result = self.handle_selection()
                         if result is not None:
                             # User selected a folder
                             return result
 
-                    elif char == 'q' or char == 'Q':  # Quit
+                    elif char == "q" or char == "Q":  # Quit
                         raise SystemExit(1)
 
-                    elif char == '\x03':  # Ctrl+C
+                    elif char == "\x03":  # Ctrl+C
                         raise KeyboardInterrupt
 
                     # Update the display
@@ -364,7 +357,9 @@ class S3FolderBrowser:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
-def browse_s3_folders(bucket: str, aws_profile: Optional[str], initial_prefix: Optional[str] = None) -> str:
+def browse_s3_folders(
+    bucket: str, aws_profile: str | None, initial_prefix: str | None = None
+) -> str:
     """Browse S3 folders and select upload target.
 
     If initial_prefix is provided, skip browser and return it directly.
@@ -389,13 +384,13 @@ def browse_s3_folders(bucket: str, aws_profile: Optional[str], initial_prefix: O
         print(f"Error: Cannot access S3 bucket '{bucket}'")
         print()
         print(str(e))
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # If prefix provided via CLI, skip browser
     if initial_prefix is not None:
         # Ensure prefix ends with / if not empty
-        if initial_prefix and not initial_prefix.endswith('/'):
-            initial_prefix = initial_prefix + '/'
+        if initial_prefix and not initial_prefix.endswith("/"):
+            initial_prefix = initial_prefix + "/"
         return initial_prefix
 
     # Run interactive browser
@@ -411,4 +406,4 @@ def browse_s3_folders(bucket: str, aws_profile: Optional[str], initial_prefix: O
 
     except KeyboardInterrupt:
         print("\n\nCancelled by user")
-        raise SystemExit(1)
+        raise SystemExit(1) from None

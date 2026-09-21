@@ -7,20 +7,18 @@ displaying information.
 """
 
 from pathlib import Path
-from typing import List, Optional
-import sys
 
-from photo_terminal.processor import process_images, ProcessedImage
-from photo_terminal.uploader import _normalize_prefix, _construct_s3_key
+from photo_terminal.processor import ProcessedImage, process_images
+from photo_terminal.uploader import _construct_s3_key, _normalize_prefix
 
 
 def dry_run_upload(
-    images: List[Path],
+    images: list[Path],
     bucket: str,
     prefix: str,
     target_size_kb: int,
-    aws_profile: Optional[str],
-    output_format: str = 'JPEG'
+    aws_profile: str | None,
+    output_format: str = "JPEG",
 ) -> None:
     """Show what would be uploaded without actually uploading.
 
@@ -50,7 +48,7 @@ def dry_run_upload(
         temp_dir, processed_images = process_images(images, target_size_kb, output_format)
     except Exception as e:
         print(f"Error during image processing: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     try:
         # Display file-by-file report
@@ -74,7 +72,9 @@ def dry_run_upload(
     raise SystemExit(0)
 
 
-def _print_header(bucket: str, prefix: str, target_size_kb: int, output_format: str = 'JPEG') -> None:
+def _print_header(
+    bucket: str, prefix: str, target_size_kb: int, output_format: str = "JPEG"
+) -> None:
     """Print dry-run mode header.
 
     Args:
@@ -100,7 +100,7 @@ def _print_header(bucket: str, prefix: str, target_size_kb: int, output_format: 
     print()
 
 
-def _print_files_report(processed_images: List[ProcessedImage]) -> None:
+def _print_files_report(processed_images: list[ProcessedImage]) -> None:
     """Print file-by-file processing report.
 
     Args:
@@ -131,7 +131,7 @@ def _print_files_report(processed_images: List[ProcessedImage]) -> None:
         print()
 
 
-def _print_summary(processed_images: List[ProcessedImage]) -> None:
+def _print_summary(processed_images: list[ProcessedImage]) -> None:
     """Print summary statistics.
 
     Args:
@@ -157,7 +157,7 @@ def _print_summary(processed_images: List[ProcessedImage]) -> None:
     print()
 
 
-def _print_s3_keys(processed_images: List[ProcessedImage], prefix: str) -> None:
+def _print_s3_keys(processed_images: list[ProcessedImage], prefix: str) -> None:
     """Print S3 keys that would be created.
 
     Args:

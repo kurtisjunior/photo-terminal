@@ -19,7 +19,7 @@ Algorithm (standard half-block technique used by pixterm, ansipix, climage, etc.
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import cast
 
 from PIL import Image
 
@@ -47,7 +47,7 @@ def _composite_on_black(image: Image.Image) -> Image.Image:
     return background
 
 
-def render_image_to_ansi_from_pil(image: Image.Image, width: int, height: int) -> List[str]:
+def render_image_to_ansi_from_pil(image: Image.Image, width: int, height: int) -> list[str]:
     """Render a PIL Image to ANSI half-block art.
 
     Converts the image to colored Unicode half-block characters using 24-bit
@@ -75,24 +75,27 @@ def render_image_to_ansi_from_pil(image: Image.Image, width: int, height: int) -
         # pixels, so we need height * 2 pixel rows.
         pixel_width = max(1, width)
         pixel_height = max(1, height * 2)
-        image = image.resize((pixel_width, pixel_height), Image.LANCZOS)
+        image = image.resize((pixel_width, pixel_height), Image.Resampling.LANCZOS)
 
-        # Use load() for fast pixel access via indexing
-        pixels = image.load()
+        # Use load() for fast pixel access via indexing. An RGB image always
+        # has a pixel accessor; the Optional in the stubs covers closed images.
+        accessor = image.load()
+        if accessor is None:  # pragma: no cover - defensive
+            raise ValueError("image has no pixel data")
 
-        lines: List[str] = []
+        lines: list[str] = []
 
         for row in range(height):
             top_y = row * 2
             bot_y = top_y + 1
 
-            parts: List[str] = []
-            prev_bg: Tuple[int, int, int] = (-1, -1, -1)
-            prev_fg: Tuple[int, int, int] = (-1, -1, -1)
+            parts: list[str] = []
+            prev_bg: tuple[int, int, int] = (-1, -1, -1)
+            prev_fg: tuple[int, int, int] = (-1, -1, -1)
 
             for x in range(pixel_width):
-                bg = pixels[x, top_y]  # top pixel -> background
-                fg = pixels[x, bot_y]  # bottom pixel -> foreground
+                bg = cast(tuple[int, int, int], accessor[x, top_y])  # top -> background
+                fg = cast(tuple[int, int, int], accessor[x, bot_y])  # bottom -> foreground
 
                 if bg == prev_bg and fg == prev_fg:
                     # Run-length: same colors, just emit the block character
@@ -102,9 +105,7 @@ def render_image_to_ansi_from_pil(image: Image.Image, width: int, height: int) -
                     br, bg_g, bb = bg
                     fr, fg_g, fb = fg
                     parts.append(
-                        f"\033[48;2;{br};{bg_g};{bb}m"
-                        f"\033[38;2;{fr};{fg_g};{fb}m"
-                        f"{HALF_BLOCK}"
+                        f"\033[48;2;{br};{bg_g};{bb}m\033[38;2;{fr};{fg_g};{fb}m{HALF_BLOCK}"
                     )
                     prev_bg = bg
                     prev_fg = fg
@@ -119,7 +120,7 @@ def render_image_to_ansi_from_pil(image: Image.Image, width: int, height: int) -
         return [f"[Render error: {e}]"]
 
 
-def render_image_to_ansi(image_path: Path, width: int, height: int) -> List[str]:
+def render_image_to_ansi(image_path: Path, width: int, height: int) -> list[str]:
     """Render an image file to ANSI half-block art.
 
     Opens the image at the given path and converts it to colored Unicode

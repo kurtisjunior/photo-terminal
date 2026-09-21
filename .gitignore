@@ -52,6 +52,9 @@ temp_*/
 photo_upload_*/
 photo-uploader.yaml
 
+# ...but the committed test fixtures are the suite's inputs, not stray photos.
+!tests/fixtures/**
+
 # Planwheel
 .planwheel/
 .claude/

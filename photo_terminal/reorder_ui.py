@@ -3,26 +3,36 @@
 Uses the same two-pane rendering as Stage 1 (tui.py) with grab-and-drop reordering.
 """
 
-from pathlib import Path
-from typing import List, Optional, Tuple
+import functools
 import os
 import subprocess
 import sys
 import termios
-import tty
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import tty
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
 
-from photo_terminal.reorder import ImageReorderer, generate_prefixed_filenames, get_final_filenames_preview
-from photo_terminal.tui import check_viu_availability, TerminalCapabilities
-from photo_terminal.input_utils import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout, read_key_with_timeout_or_signal
+from photo_terminal.input_utils import (
+    KEY_DOWN,
+    KEY_ESC,
+    KEY_UP,
+    read_key_with_timeout_or_signal,
+)
 from photo_terminal.renderer import render_image_to_ansi
+from photo_terminal.reorder import (
+    ImageReorderer,
+    generate_prefixed_filenames,
+    get_final_filenames_preview,
+)
+from photo_terminal.tui import TerminalCapabilities, check_viu_availability
 
 
 class ReorderImageSelector:
     """Image reorderer with two-pane TUI (same rendering as Stage 1)."""
 
-    def __init__(self, images: List[Path]):
+    def __init__(self, images: list[Path]):
         """Initialize reorder selector.
 
         Args:
@@ -32,35 +42,33 @@ class ReorderImageSelector:
             raise ValueError("Images list cannot be empty")
 
         self.reorderer = ImageReorderer(images)
-        self._image_cache = {}
+        self._image_cache: dict[str, list[str]] = {}
         self._first_render = True
         self._protocol = TerminalCapabilities.detect_graphics_protocol()
         self._preview_executor = ThreadPoolExecutor(max_workers=4)
-        self._preview_futures = {}
+        self._preview_futures: dict[str, Future[list[str]]] = {}
         self._preview_lock = threading.Lock()
         self._preview_dirty = False
         self._notify_r, self._notify_w = os.pipe()
         os.set_blocking(self._notify_r, False)
-        self._last_preview_key = None
+        self._last_preview_key: str | None = None
         self._last_preview_cached = False
 
-    def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int, use_blocks: bool) -> None:
+    def _schedule_preview(
+        self, cache_key: str, image_path: Path, width: int, height: int, use_blocks: bool
+    ) -> None:
         if cache_key in self._image_cache:
             return
         with self._preview_lock:
             if cache_key in self._preview_futures:
                 return
             future = self._preview_executor.submit(
-                self._render_preview_output,
-                image_path,
-                width,
-                height,
-                use_blocks
+                self._render_preview_output, image_path, width, height, use_blocks
             )
             self._preview_futures[cache_key] = future
-        future.add_done_callback(lambda f, key=cache_key: self._store_preview_result(key, f))
+        future.add_done_callback(functools.partial(self._store_preview_result, cache_key))
 
-    def _store_preview_result(self, cache_key: str, future) -> None:
+    def _store_preview_result(self, cache_key: str, future: Future[Any]) -> None:
         try:
             output = future.result()
         except Exception as e:
@@ -71,7 +79,7 @@ class ReorderImageSelector:
                 self._image_cache[cache_key] = output
             self._preview_dirty = True
             try:
-                os.write(self._notify_w, b'\x00')
+                os.write(self._notify_w, b"\x00")
             except OSError:
                 pass
 
@@ -82,21 +90,16 @@ class ReorderImageSelector:
 
         cmd = ["viu", "-w", str(width), "-h", str(height), str(image_path)]
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=False,
-            timeout=3
-        )
+        result = subprocess.run(cmd, capture_output=True, text=False, timeout=3)
         if result.returncode == 0:
-            return result.stdout.decode('utf-8', errors='replace').splitlines()
-        error_msg = result.stderr.decode('utf-8', errors='replace').strip()
+            return result.stdout.decode("utf-8", errors="replace").splitlines()
+        error_msg = result.stderr.decode("utf-8", errors="replace").strip()
         return [f"[Preview error: {error_msg}]"]
 
-    def _get_preview_lines(self, image_path: Path, width: int, height: int) -> List[str]:
+    def _get_preview_lines(self, image_path: Path, width: int, height: int) -> list[str]:
         """Get cached preview lines for an image (same as tui.py)."""
         # Detect if we should use graphics protocol or blocks
-        use_blocks = self._protocol == 'blocks'
+        use_blocks = self._protocol == "blocks"
         cache_key = f"{'blocks' if use_blocks else 'graphics'}:{image_path}:{width}:{height}"
 
         if cache_key in self._image_cache:
@@ -105,7 +108,7 @@ class ReorderImageSelector:
         self._schedule_preview(cache_key, image_path, width, height, use_blocks)
         return ["[Loading preview...]"]
 
-    def _create_file_list_lines(self) -> List[str]:
+    def _create_file_list_lines(self) -> list[str]:
         """Create file list display lines."""
         images = self.reorderer.get_ordered_images()
         current_idx = self.reorderer.get_current_index()
@@ -164,10 +167,10 @@ class ReorderImageSelector:
 
         # Anti-flicker optimization
         if self._first_render:
-            parts.append('\033[2J\033[H')
+            parts.append("\033[2J\033[H")
             self._first_render = False
         else:
-            parts.append('\033[H')
+            parts.append("\033[H")
 
         # Get dimensions
         terminal_size = os.get_terminal_size()
@@ -183,10 +186,14 @@ class ReorderImageSelector:
         current_image = images[current_idx]
 
         # Determine if preview needs updating
-        use_blocks = self._protocol == 'blocks'
-        cache_key = f"{'blocks' if use_blocks else 'graphics'}:{current_image}:{image_width}:{image_height}"
+        use_blocks = self._protocol == "blocks"
+        cache_key = (
+            f"{'blocks' if use_blocks else 'graphics'}:{current_image}:{image_width}:{image_height}"
+        )
         cache_hit = cache_key in self._image_cache
-        preview_changed = (cache_key != self._last_preview_key) or (cache_hit and not self._last_preview_cached)
+        preview_changed = (cache_key != self._last_preview_key) or (
+            cache_hit and not self._last_preview_cached
+        )
 
         if preview_changed:
             self._last_preview_key = cache_key
@@ -199,19 +206,23 @@ class ReorderImageSelector:
         file_list_lines = self._create_file_list_lines()
 
         # Render side-by-side
-        max_lines = len(file_list_lines) if preview_lines is None else max(len(file_list_lines), len(preview_lines))
+        max_lines = (
+            len(file_list_lines)
+            if preview_lines is None
+            else max(len(file_list_lines), len(preview_lines))
+        )
         for row in range(max_lines):
             # File list on left
             if row < len(file_list_lines):
-                parts.append(f'\033[{row + 1};{file_list_column}H')
+                parts.append(f"\033[{row + 1};{file_list_column}H")
                 parts.append(file_list_lines[row])
 
             # Preview on right
             if preview_lines is not None and row < len(preview_lines):
-                parts.append(f'\033[{row + 1};{image_column}H')
+                parts.append(f"\033[{row + 1};{image_column}H")
                 parts.append(preview_lines[row])
 
-        sys.stdout.write(''.join(parts))
+        sys.stdout.write("".join(parts))
         sys.stdout.flush()
 
         self._trigger_preload()
@@ -220,7 +231,7 @@ class ReorderImageSelector:
         """Pre-load adjacent images in background."""
         images = self.reorderer.get_ordered_images()
         idx = self.reorderer.get_current_index()
-        use_blocks = self._protocol == 'blocks'
+        use_blocks = self._protocol == "blocks"
         terminal_size = os.get_terminal_size()
         image_column = 56
         image_width = max(40, min(terminal_size.columns - image_column - 2, 70))
@@ -233,7 +244,7 @@ class ReorderImageSelector:
                 cache_key = f"{'blocks' if use_blocks else 'graphics'}:{img_path}:{image_width}:{image_height}"
                 self._schedule_preview(cache_key, img_path, image_width, image_height, use_blocks)
 
-    def run(self) -> Optional[List[Tuple[Path, str]]]:
+    def run(self) -> list[tuple[Path, str]] | None:
         """Run the interactive reorder UI.
 
         Returns:
@@ -253,7 +264,7 @@ class ReorderImageSelector:
             tty.setraw(fd)
 
             # Hide cursor
-            sys.stdout.write('\033[?25l')
+            sys.stdout.write("\033[?25l")
             sys.stdout.flush()
 
             # Initial render
@@ -280,20 +291,20 @@ class ReorderImageSelector:
                     return None
 
                 # Handle regular keys
-                elif key in ('j', 'J'):
+                elif key in ("j", "J"):
                     self.reorderer.move_down()
-                elif key in ('k', 'K'):
+                elif key in ("k", "K"):
                     self.reorderer.move_up()
-                elif key == ' ':  # Space = grab/drop
+                elif key == " ":  # Space = grab/drop
                     self.reorderer.toggle_grab()
-                elif key in ('r', 'R'):  # Reset
+                elif key in ("r", "R"):  # Reset
                     self.reorderer.reset()
-                elif key in ('\r', '\n'):  # Enter = confirm
+                elif key in ("\r", "\n"):  # Enter = confirm
                     ordered_images = self.reorderer.get_ordered_images()
                     return generate_prefixed_filenames(ordered_images)
-                elif key in ('q', 'Q'):  # Quit
+                elif key in ("q", "Q"):  # Quit
                     return None
-                elif key == '\x03':  # Ctrl+C
+                elif key == "\x03":  # Ctrl+C
                     raise KeyboardInterrupt
 
                 # Redraw
@@ -304,8 +315,8 @@ class ReorderImageSelector:
 
         finally:
             # Restore terminal
-            sys.stdout.write('\033[?25h')  # Show cursor
-            sys.stdout.write('\033[2J\033[H')  # Clear screen
+            sys.stdout.write("\033[?25h")  # Show cursor
+            sys.stdout.write("\033[2J\033[H")  # Clear screen
             sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             try:
@@ -319,7 +330,7 @@ class ReorderImageSelector:
                 pass
 
 
-def reorder_images_interactive(images: List[Path]) -> Optional[List[Tuple[Path, str]]]:
+def reorder_images_interactive(images: list[Path]) -> list[tuple[Path, str]] | None:
     """Interactive function to reorder images with visual preview.
 
     Args:

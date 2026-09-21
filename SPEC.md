@@ -44,7 +44,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 - Source images are in standard web formats only: JPEG, PNG, WEBP, TIFF, BMP, GIF
 - Target S3 bucket (two-touch) exists with location-based folder structure (japan/, italy/, etc.)
 - AWS permissions configured for ListBucket and PutObject operations
-- Python 3.8+ with Pillow, boto3, and TUI libraries available
+- Python 3.12+ with Pillow, boto3, and TUI libraries available
 - Sufficient local disk space in temp directory for batch processing
 - Primary use case is personal photography workflow (speed, UX, reliability prioritized)
 - User's website handles generation of size variants (_medium, _small, _thumb) and WEBP conversion

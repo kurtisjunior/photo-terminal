@@ -8,21 +8,18 @@ version = "1.0.0"
 description = "Terminal-based image upload manager with inline preview for S3"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+# The nix devShell has always pinned python312. The 3.8 floor claimed support
+# that was never built or tested against.
+requires-python = ">=3.12"
 dependencies = [
     "PyYAML",
     "Pillow",
     "boto3",
     "rich",
-    "readchar",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
@@ -30,4 +27,45 @@ classifiers = [
 photo-upload = "photo_terminal.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "import-linter",
+]
+
+[tool.setuptools.packages.find]
+include = ["photo_terminal*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+]
+# The formatter owns line length; E501 would only duplicate it and fire on
+# strings and URLs that cannot be wrapped.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+# Strict mode arrives in phase 2, scoped to the packages it applies to, so
+# there is never an override pointing at a module that does not exist.
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*", "yaml.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+# An xfail that starts passing is a failure until the marker comes off.
+xfail_strict = true

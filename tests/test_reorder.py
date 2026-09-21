@@ -1,13 +1,13 @@
 """Unit tests for image reordering logic."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from photo_terminal.reorder import (
     ImageReorderer,
-    ReorderState,
     generate_prefixed_filenames,
-    get_final_filenames_preview
+    get_final_filenames_preview,
 )
 
 
@@ -18,7 +18,7 @@ def sample_images():
         Path("/tmp/image1.jpg"),
         Path("/tmp/image2.jpg"),
         Path("/tmp/image3.jpg"),
-        Path("/tmp/image4.jpg")
+        Path("/tmp/image4.jpg"),
     ]
 
 

@@ -5,10 +5,9 @@ Follows fail-fast philosophy - exits immediately on user cancellation.
 """
 
 from pathlib import Path
-from typing import List
 
 
-def confirm_upload(images: List[Path], bucket: str, prefix: str) -> bool:
+def confirm_upload(images: list[Path], bucket: str, prefix: str) -> bool:
     """Display upload summary and prompt for user confirmation.
 
     Args:
@@ -54,17 +53,19 @@ def confirm_upload(images: List[Path], bucket: str, prefix: str) -> bool:
     # Prompt for confirmation
     while True:
         try:
-            response = input(f"Upload {len(images)} image(s) to {s3_target}? [y/n]: ").strip().lower()
+            response = (
+                input(f"Upload {len(images)} image(s) to {s3_target}? [y/n]: ").strip().lower()
+            )
         except EOFError:
             # Handle Ctrl+D as cancellation
             print()
             print("Upload cancelled.")
-            raise SystemExit(1)
+            raise SystemExit(1) from None
 
-        if response in ('y', 'yes'):
+        if response in ("y", "yes"):
             print()
             return True
-        elif response in ('n', 'no'):
+        elif response in ("n", "no"):
             print()
             print("Upload cancelled.")
             raise SystemExit(1)

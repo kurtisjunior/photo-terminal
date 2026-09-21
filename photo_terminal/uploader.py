@@ -6,30 +6,25 @@ on any upload error.
 """
 
 import sys
-import time
-from typing import List, Optional
 
 import boto3
-from botocore.exceptions import ClientError, BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from photo_terminal.processor import ProcessedImage
 
-
 # Spinner animation frames
-SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 class UploadError(Exception):
     """Raised when S3 upload fails."""
+
     pass
 
 
 def upload_images(
-    processed_images: List[ProcessedImage],
-    bucket: str,
-    prefix: str,
-    aws_profile: Optional[str]
-) -> List[str]:
+    processed_images: list[ProcessedImage], bucket: str, prefix: str, aws_profile: str | None
+) -> list[str]:
     """Upload processed images to S3 with minimal progress feedback.
 
     Uploads each processed image from temp directory to S3 bucket with the
@@ -60,13 +55,13 @@ def upload_images(
     # Create boto3 S3 client with specified profile (or from environment)
     try:
         session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-        s3_client = session.client('s3')
+        s3_client = session.client("s3")
     except Exception as e:
         error_msg = f"Failed to create AWS session: {e}"
         error_msg += (
-            f"\nTry: aws configure --profile {aws_profile}" if aws_profile
-            else "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
-                 "(see .env.example)"
+            f"\nTry: aws configure --profile {aws_profile}"
+            if aws_profile
+            else "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (see .env.example)"
         )
         raise UploadError(error_msg) from e
 
@@ -77,7 +72,11 @@ def upload_images(
     try:
         for idx, processed_img in enumerate(processed_images, start=1):
             # Construct S3 key - use upload_filename if set (for reordering), otherwise use original name
-            filename = processed_img.upload_filename if processed_img.upload_filename else processed_img.original_path.name
+            filename = (
+                processed_img.upload_filename
+                if processed_img.upload_filename
+                else processed_img.original_path.name
+            )
             s3_key = _construct_s3_key(normalized_prefix, filename)
 
             # Show progress with spinner
@@ -86,9 +85,7 @@ def upload_images(
             # Upload to S3
             try:
                 s3_client.upload_file(
-                    Filename=str(processed_img.temp_path),
-                    Bucket=bucket,
-                    Key=s3_key
+                    Filename=str(processed_img.temp_path), Bucket=bucket, Key=s3_key
                 )
                 uploaded_keys.append(s3_key)
 
@@ -97,8 +94,8 @@ def upload_images(
                 _clear_progress()
 
                 # Extract error details
-                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-                error_msg = e.response.get('Error', {}).get('Message', str(e))
+                error_code = e.response.get("Error", {}).get("Code", "Unknown")
+                error_msg = e.response.get("Error", {}).get("Message", str(e))
 
                 # Fail-fast with detailed error message
                 raise UploadError(
@@ -148,7 +145,7 @@ def _normalize_prefix(prefix: str) -> str:
     normalized = prefix.strip()
 
     # Remove trailing slashes
-    normalized = normalized.rstrip('/')
+    normalized = normalized.rstrip("/")
 
     return normalized
 

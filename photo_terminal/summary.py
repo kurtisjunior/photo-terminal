@@ -4,16 +4,11 @@ Shows upload completion information with statistics, file list, and S3 locations
 Minimal output aligned with fail-fast philosophy.
 """
 
-from typing import List
-
 from photo_terminal.processor import ProcessedImage
 
 
 def show_completion_summary(
-    processed_images: List[ProcessedImage],
-    uploaded_keys: List[str],
-    bucket: str,
-    prefix: str
+    processed_images: list[ProcessedImage], uploaded_keys: list[str], bucket: str, prefix: str
 ) -> None:
     """Display upload completion summary with statistics and file list.
 
@@ -78,7 +73,7 @@ def show_completion_summary(
 
     # Print uploaded files with S3 keys
     print("Uploaded files:")
-    for proc_img, s3_key in zip(processed_images, uploaded_keys):
+    for proc_img, s3_key in zip(processed_images, uploaded_keys, strict=False):
         filename = proc_img.original_path.name
         print(f"  - {filename} → {s3_key}")
 

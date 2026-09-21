@@ -1,97 +1,60 @@
-"""Integration tests for optimizer using real test image.
+"""Integration tests for the optimizer against a real photographic image.
 
-These tests demonstrate the optimizer working with the actual test.jpeg
-file in the project directory.
+These used to point at ``/Users/kurtis/tinker/photo-terminal/test.jpeg``, an
+absolute path from one developer's machine, and skipped everywhere else. They
+now run against ``tests/fixtures/photo_2400x1800.jpg``, which is committed and
+is deliberately over both the optimizer's 1920px max dimension and its 400KB
+default target, so the resize and the quality-iteration loop both execute.
 """
 
-import pytest
 from pathlib import Path
-import tempfile
-import shutil
 
-from photo_terminal.optimizer import optimize_image
+from photo_terminal.optimizer import MINIMUM_QUALITY, OptimizationWarning, optimize_image
 
 
-@pytest.fixture
-def temp_dir():
-    """Create temporary directory for test files."""
-    temp = tempfile.mkdtemp()
-    yield Path(temp)
-    shutil.rmtree(temp)
-
-
-@pytest.fixture
-def test_image():
-    """Use the actual test.jpeg file from project directory."""
-    test_file = Path("/Users/kurtis/tinker/photo-terminal/test.jpeg")
-    if not test_file.exists():
-        pytest.skip("test.jpeg not found")
-    return test_file
+def _target_not_reached(warnings: list[str]) -> bool:
+    return any(w.startswith(OptimizationWarning.TARGET_NOT_REACHED) for w in warnings)
 
 
 class TestRealImageOptimization:
-    """Test optimization with real test image."""
+    """Test optimization with a real photographic image."""
 
-    def test_optimize_test_jpeg(self, test_image, temp_dir):
-        """Test optimization of the actual test.jpeg file."""
-        output_path = temp_dir / "optimized_test.jpg"
+    def test_optimize_to_default_target(self, photo_2400x1800: Path, tmp_path: Path) -> None:
+        """A 2400x1800 photo is resized and compressed down to the 400KB target."""
+        output_path = tmp_path / "optimized_test.jpg"
 
-        result = optimize_image(
-            test_image,
-            output_path,
-            target_size_kb=400
-        )
-
-        print(f"\nOptimization Results:")
-        print(f"  Original size: {result['original_size'] / 1024:.1f} KB")
-        print(f"  Final size: {result['final_size'] / 1024:.1f} KB")
-        print(f"  Quality used: {result['quality_used']}")
-        print(f"  Original format: {result['format']}")
-        print(f"  Warnings: {result['warnings']}")
-
-        # Verify output exists
-        assert output_path.exists()
-
-        # Verify result structure
-        assert 'original_size' in result
-        assert 'final_size' in result
-        assert 'quality_used' in result
-
-    def test_optimize_to_smaller_target(self, test_image, temp_dir):
-        """Test optimization with smaller target size."""
-        output_path = temp_dir / "optimized_small.jpg"
-
-        result = optimize_image(
-            test_image,
-            output_path,
-            target_size_kb=200
-        )
-
-        print(f"\nSmall Target Optimization Results:")
-        print(f"  Original size: {result['original_size'] / 1024:.1f} KB")
-        print(f"  Final size: {result['final_size'] / 1024:.1f} KB")
-        print(f"  Quality used: {result['quality_used']}")
-        print(f"  Target was: 200 KB")
+        result = optimize_image(photo_2400x1800, output_path, target_size_kb=400)
 
         assert output_path.exists()
+        assert output_path.stat().st_size <= 400 * 1024
 
-    def test_optimize_to_larger_target(self, test_image, temp_dir):
-        """Test optimization when image is already under target."""
-        output_path = temp_dir / "optimized_large.jpg"
+        # Resized down to the 1920px max dimension, aspect ratio preserved.
+        assert result["original_dimensions"] == (2400, 1800)
+        assert result["final_dimensions"] == (1920, 1440)
+        assert result["resized"] is True
 
-        # Use large target that test.jpeg is already under
-        result = optimize_image(
-            test_image,
-            output_path,
-            target_size_kb=10000  # 10MB
-        )
+        # The target needed real compression, so quality stepped below the top.
+        assert result["quality_used"] < 95
+        assert result["quality_used"] >= MINIMUM_QUALITY
+        assert result["final_size"] < result["original_size"]
+        assert not _target_not_reached(result["warnings"])
 
-        print(f"\nLarge Target Optimization Results:")
-        print(f"  Original size: {result['original_size'] / 1024:.1f} KB")
-        print(f"  Final size: {result['final_size'] / 1024:.1f} KB")
-        print(f"  Quality used: {result['quality_used']}")
-        print(f"  Target was: 10000 KB")
+    def test_optimize_to_smaller_target(self, photo_2400x1800: Path, tmp_path: Path) -> None:
+        """A target this image cannot reach bottoms out at minimum quality and warns."""
+        output_path = tmp_path / "optimized_small.jpg"
+
+        result = optimize_image(photo_2400x1800, output_path, target_size_kb=100)
 
         assert output_path.exists()
-        # Should use quality 95 since already under target
-        assert result['quality_used'] == 95
+        assert result["quality_used"] == MINIMUM_QUALITY
+        assert _target_not_reached(result["warnings"])
+
+    def test_optimize_to_larger_target(self, photo_2400x1800: Path, tmp_path: Path) -> None:
+        """A target the image is already under keeps the top quality step."""
+        output_path = tmp_path / "optimized_large.jpg"
+
+        result = optimize_image(photo_2400x1800, output_path, target_size_kb=10000)
+
+        assert output_path.exists()
+        assert result["quality_used"] == 95
+        assert not _target_not_reached(result["warnings"])

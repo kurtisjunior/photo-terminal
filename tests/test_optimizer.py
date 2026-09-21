@@ -12,19 +12,18 @@ Tests cover:
 - RGB conversion (e.g., RGBA, Grayscale)
 """
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
 from PIL import Image
-from PIL.ExifTags import TAGS
-import io
 
 from photo_terminal.optimizer import (
-    optimize_image,
-    OptimizationWarning,
+    MINIMUM_QUALITY,
     QUALITY_STEPS,
-    MINIMUM_QUALITY
+    OptimizationWarning,
+    optimize_image,
 )
 
 
@@ -40,8 +39,8 @@ def temp_dir():
 def sample_image_rgb(temp_dir):
     """Create a sample RGB image for testing."""
     img_path = temp_dir / "sample_rgb.jpg"
-    img = Image.new('RGB', (800, 600), color='blue')
-    img.save(img_path, 'JPEG', quality=95)
+    img = Image.new("RGB", (800, 600), color="blue")
+    img.save(img_path, "JPEG", quality=95)
     return img_path
 
 
@@ -49,8 +48,8 @@ def sample_image_rgb(temp_dir):
 def sample_image_rgba(temp_dir):
     """Create a sample RGBA image for testing."""
     img_path = temp_dir / "sample_rgba.png"
-    img = Image.new('RGBA', (800, 600), color=(255, 0, 0, 128))
-    img.save(img_path, 'PNG')
+    img = Image.new("RGBA", (800, 600), color=(255, 0, 0, 128))
+    img.save(img_path, "PNG")
     return img_path
 
 
@@ -58,8 +57,8 @@ def sample_image_rgba(temp_dir):
 def sample_image_grayscale(temp_dir):
     """Create a sample grayscale image for testing."""
     img_path = temp_dir / "sample_gray.jpg"
-    img = Image.new('L', (800, 600), color=128)
-    img.save(img_path, 'JPEG', quality=95)
+    img = Image.new("L", (800, 600), color=128)
+    img.save(img_path, "JPEG", quality=95)
     return img_path
 
 
@@ -70,7 +69,7 @@ def large_image_with_exif(temp_dir):
 
     # Create a large image with complex pattern (will be > 400KB)
     # Using a gradient pattern to make it less compressible
-    img = Image.new('RGB', (3000, 2000))
+    img = Image.new("RGB", (3000, 2000))
     pixels = img.load()
     for i in range(img.size[0]):
         for j in range(img.size[1]):
@@ -79,11 +78,11 @@ def large_image_with_exif(temp_dir):
     # Create EXIF data
     exif = Image.Exif()
     # Add camera model
-    exif[0x010f] = "Canon"  # Make
+    exif[0x010F] = "Canon"  # Make
     exif[0x0110] = "Canon EOS 5D Mark IV"  # Model
     exif[0x9003] = "2026:01:26 10:30:00"  # DateTimeOriginal
 
-    img.save(img_path, 'JPEG', quality=95, exif=exif.tobytes())
+    img.save(img_path, "JPEG", quality=95, exif=exif.tobytes())
     return img_path
 
 
@@ -91,8 +90,8 @@ def large_image_with_exif(temp_dir):
 def small_image(temp_dir):
     """Create a small image (< 400KB) for testing."""
     img_path = temp_dir / "small.jpg"
-    img = Image.new('RGB', (200, 150), color='green')
-    img.save(img_path, 'JPEG', quality=95)
+    img = Image.new("RGB", (200, 150), color="green")
+    img.save(img_path, "JPEG", quality=95)
     return img_path
 
 
@@ -100,8 +99,8 @@ def small_image(temp_dir):
 def webp_image(temp_dir):
     """Create a WEBP image for format conversion testing."""
     img_path = temp_dir / "sample.webp"
-    img = Image.new('RGB', (800, 600), color='yellow')
-    img.save(img_path, 'WEBP', quality=90)
+    img = Image.new("RGB", (800, 600), color="yellow")
+    img.save(img_path, "WEBP", quality=90)
     return img_path
 
 
@@ -109,8 +108,8 @@ def webp_image(temp_dir):
 def png_image(temp_dir):
     """Create a PNG image for format conversion testing."""
     img_path = temp_dir / "sample.png"
-    img = Image.new('RGB', (800, 600), color='purple')
-    img.save(img_path, 'PNG')
+    img = Image.new("RGB", (800, 600), color="purple")
+    img.save(img_path, "PNG")
     return img_path
 
 
@@ -118,8 +117,8 @@ def png_image(temp_dir):
 def gif_image(temp_dir):
     """Create a GIF image for format conversion testing."""
     img_path = temp_dir / "sample.gif"
-    img = Image.new('RGB', (400, 300), color='orange')
-    img.save(img_path, 'GIF')
+    img = Image.new("RGB", (400, 300), color="orange")
+    img.save(img_path, "GIF")
     return img_path
 
 
@@ -130,60 +129,47 @@ class TestBasicOptimization:
         """Test optimization of image larger than target size."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=400)
 
         # Check that output file was created
         assert output_path.exists()
 
         # Check that result contains expected keys
-        assert 'original_size' in result
-        assert 'final_size' in result
-        assert 'quality_used' in result
-        assert 'format' in result
-        assert 'warnings' in result
+        assert "original_size" in result
+        assert "final_size" in result
+        assert "quality_used" in result
+        assert "format" in result
+        assert "warnings" in result
 
         # Check that final size is less than target
-        assert result['final_size'] <= 400 * 1024
+        assert result["final_size"] <= 400 * 1024
 
         # Check that quality is within expected range
-        assert result['quality_used'] in QUALITY_STEPS
+        assert result["quality_used"] in QUALITY_STEPS
 
         # Check that format was detected
-        assert result['format'] == 'JPEG'
+        assert result["format"] == "JPEG"
 
     def test_optimize_small_image(self, small_image, temp_dir):
         """Test optimization of image already smaller than target."""
         output_path = temp_dir / "output.jpg"
-        original_size = small_image.stat().st_size
 
-        result = optimize_image(
-            small_image,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(small_image, output_path, target_size_kb=400)
 
         # Should use quality 95 for images already under target
-        assert result['quality_used'] == 95
-        assert result['final_size'] <= result['original_size'] or result['final_size'] <= 400 * 1024
+        assert result["quality_used"] == 95
+        assert result["final_size"] <= result["original_size"] or result["final_size"] <= 400 * 1024
 
     def test_quality_iteration(self, large_image_with_exif, temp_dir):
         """Test that quality decreases to reach target size."""
         output_path = temp_dir / "output.jpg"
 
         # Use a small target to force quality reduction
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=100
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=100)
 
         # Should use a lower quality setting
-        assert result['quality_used'] < 95
-        assert result['quality_used'] >= MINIMUM_QUALITY
+        assert result["quality_used"] < 95
+        assert result["quality_used"] >= MINIMUM_QUALITY
 
 
 class TestExifPreservation:
@@ -193,11 +179,7 @@ class TestExifPreservation:
         """Test that EXIF data is preserved during optimization."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=400
-        )
+        optimize_image(large_image_with_exif, output_path, target_size_kb=400)
 
         # Open output image and check for EXIF
         output_img = Image.open(output_path)
@@ -212,14 +194,10 @@ class TestExifPreservation:
         output_path = temp_dir / "output.jpg"
 
         # Should not raise exception
-        result = optimize_image(
-            sample_image_rgb,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(sample_image_rgb, output_path, target_size_kb=400)
 
         # Should have warning about no EXIF data
-        warning_types = [w.split(':')[0] for w in result['warnings']]
+        warning_types = [w.split(":")[0] for w in result["warnings"]]
         assert OptimizationWarning.NO_EXIF_DATA in warning_types
 
 
@@ -230,52 +208,40 @@ class TestFormatConversion:
         """Test PNG to JPEG conversion."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            png_image,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(png_image, output_path, target_size_kb=400)
 
         assert output_path.exists()
-        assert result['format'] == 'PNG'
+        assert result["format"] == "PNG"
 
         # Verify output is JPEG
         output_img = Image.open(output_path)
-        assert output_img.format == 'JPEG'
+        assert output_img.format == "JPEG"
 
     def test_webp_to_jpeg(self, webp_image, temp_dir):
         """Test WEBP to JPEG conversion."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            webp_image,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(webp_image, output_path, target_size_kb=400)
 
         assert output_path.exists()
-        assert result['format'] == 'WEBP'
+        assert result["format"] == "WEBP"
 
         # Verify output is JPEG
         output_img = Image.open(output_path)
-        assert output_img.format == 'JPEG'
+        assert output_img.format == "JPEG"
 
     def test_gif_to_jpeg(self, gif_image, temp_dir):
         """Test GIF to JPEG conversion."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            gif_image,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(gif_image, output_path, target_size_kb=400)
 
         assert output_path.exists()
-        assert result['format'] == 'GIF'
+        assert result["format"] == "GIF"
 
         # Verify output is JPEG
         output_img = Image.open(output_path)
-        assert output_img.format == 'JPEG'
+        assert output_img.format == "JPEG"
 
 
 class TestColorSpaceConversion:
@@ -285,33 +251,25 @@ class TestColorSpaceConversion:
         """Test RGBA to RGB conversion (composites on white)."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            sample_image_rgba,
-            output_path,
-            target_size_kb=400
-        )
+        optimize_image(sample_image_rgba, output_path, target_size_kb=400)
 
         assert output_path.exists()
 
         # Verify output is RGB
         output_img = Image.open(output_path)
-        assert output_img.mode == 'RGB'
+        assert output_img.mode == "RGB"
 
     def test_grayscale_to_rgb(self, sample_image_grayscale, temp_dir):
         """Test grayscale to RGB conversion."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            sample_image_grayscale,
-            output_path,
-            target_size_kb=400
-        )
+        optimize_image(sample_image_grayscale, output_path, target_size_kb=400)
 
         assert output_path.exists()
 
         # Verify output is RGB
         output_img = Image.open(output_path)
-        assert output_img.mode == 'RGB'
+        assert output_img.mode == "RGB"
 
 
 class TestMinimumQuality:
@@ -322,35 +280,29 @@ class TestMinimumQuality:
         output_path = temp_dir / "output.jpg"
 
         # Use unrealistically small target to force minimum quality
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=10
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=10)
 
         # Should use minimum quality
-        assert result['quality_used'] == MINIMUM_QUALITY
+        assert result["quality_used"] == MINIMUM_QUALITY
 
         # Should have warning about not reaching target
-        warning_types = [w.split(':')[0] for w in result['warnings']]
+        warning_types = [w.split(":")[0] for w in result["warnings"]]
         assert OptimizationWarning.TARGET_NOT_REACHED in warning_types
 
     def test_target_not_reached_warning(self, large_image_with_exif, temp_dir):
         """Test warning when target size cannot be reached."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=10
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=10)
 
         # Should have target not reached warning
-        assert any(OptimizationWarning.TARGET_NOT_REACHED in w for w in result['warnings'])
+        assert any(OptimizationWarning.TARGET_NOT_REACHED in w for w in result["warnings"])
 
         # Warning should include size information
-        warning_text = next(w for w in result['warnings'] if OptimizationWarning.TARGET_NOT_REACHED in w)
-        assert 'KB' in warning_text
+        warning_text = next(
+            w for w in result["warnings"] if OptimizationWarning.TARGET_NOT_REACHED in w
+        )
+        assert "KB" in warning_text
         assert str(MINIMUM_QUALITY) in warning_text
 
 
@@ -369,8 +321,8 @@ class TestErrorHandling:
         """Test that corrupted images cause immediate failure."""
         # Create a corrupted image file
         corrupted_path = temp_dir / "corrupted.jpg"
-        with open(corrupted_path, 'wb') as f:
-            f.write(b'Not a valid image file')
+        with open(corrupted_path, "wb") as f:
+            f.write(b"Not a valid image file")
 
         output_path = temp_dir / "output.jpg"
 
@@ -394,15 +346,13 @@ class TestTargetSizeConfiguration:
         """Test optimization with custom target size."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=200
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=200)
 
         # Should be under 200KB (or close if minimum quality reached)
-        if OptimizationWarning.TARGET_NOT_REACHED not in [w.split(':')[0] for w in result['warnings']]:
-            assert result['final_size'] <= 200 * 1024
+        if OptimizationWarning.TARGET_NOT_REACHED not in [
+            w.split(":")[0] for w in result["warnings"]
+        ]:
+            assert result["final_size"] <= 200 * 1024
 
     def test_large_target_size(self, sample_image_rgb, temp_dir):
         """Test with target size larger than original."""
@@ -411,11 +361,11 @@ class TestTargetSizeConfiguration:
         result = optimize_image(
             sample_image_rgb,
             output_path,
-            target_size_kb=5000  # 5MB
+            target_size_kb=5000,  # 5MB
         )
 
         # Should use quality 95 since image is smaller than target
-        assert result['quality_used'] == 95
+        assert result["quality_used"] == 95
 
 
 class TestAspectRatioPreservation:
@@ -430,12 +380,7 @@ class TestAspectRatioPreservation:
             original_width, original_height = img.size
             original_aspect = original_width / original_height
 
-        optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=400,
-            max_dimension=1920
-        )
+        optimize_image(large_image_with_exif, output_path, target_size_kb=400, max_dimension=1920)
 
         # Check output dimensions and aspect ratio
         with Image.open(output_path) as img:
@@ -456,39 +401,31 @@ class TestReturnedMetadata:
         """Test that return dictionary has expected structure."""
         output_path = temp_dir / "output.jpg"
 
-        result = optimize_image(
-            sample_image_rgb,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(sample_image_rgb, output_path, target_size_kb=400)
 
         # Check all required keys present
-        assert 'original_size' in result
-        assert 'final_size' in result
-        assert 'quality_used' in result
-        assert 'format' in result
-        assert 'warnings' in result
+        assert "original_size" in result
+        assert "final_size" in result
+        assert "quality_used" in result
+        assert "format" in result
+        assert "warnings" in result
 
         # Check types
-        assert isinstance(result['original_size'], int)
-        assert isinstance(result['final_size'], int)
-        assert isinstance(result['quality_used'], int)
-        assert isinstance(result['format'], str)
-        assert isinstance(result['warnings'], list)
+        assert isinstance(result["original_size"], int)
+        assert isinstance(result["final_size"], int)
+        assert isinstance(result["quality_used"], int)
+        assert isinstance(result["format"], str)
+        assert isinstance(result["warnings"], list)
 
     def test_size_reporting(self, large_image_with_exif, temp_dir):
         """Test that sizes are reported correctly."""
         output_path = temp_dir / "output.jpg"
         original_size = large_image_with_exif.stat().st_size
 
-        result = optimize_image(
-            large_image_with_exif,
-            output_path,
-            target_size_kb=400
-        )
+        result = optimize_image(large_image_with_exif, output_path, target_size_kb=400)
 
         # Original size should match file size
-        assert result['original_size'] == original_size
+        assert result["original_size"] == original_size
 
         # Final size should match output file size
-        assert result['final_size'] == output_path.stat().st_size
+        assert result["final_size"] == output_path.stat().st_size

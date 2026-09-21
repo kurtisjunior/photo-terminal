@@ -1,212 +1,113 @@
-"""Test script for configuration module.
+"""Tests for the configuration module.
 
-Run this to verify config loading works correctly.
+These were previously written as a printing script with a ``__main__`` runner,
+and four of them swallowed ``SystemExit`` in an ``except`` clause without
+asserting anything - so they passed whether or not the config layer rejected
+bad input. They now assert on the raise.
+
+Phase 5 converts ``SystemExit`` here into a typed ``ConfigError``; these tests
+move with it.
 """
 
-import tempfile
 from pathlib import Path
+
+import pytest
+
 from photo_terminal import config
 
 
-def test_default_config_creation():
-    """Test that default config file is created on first run."""
-    print("Test 1: Default config creation")
-    print("-" * 50)
-
-    # Use temp file to avoid overwriting actual config
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-
-    # Delete it so we can test creation
-    temp_path.unlink()
-
-    try:
-        cfg = config.load_config(temp_path)
-        print(f"✓ Config created at {temp_path}")
-        print(f"✓ Config loaded: {cfg}")
-        print(f"  - bucket: {cfg.bucket}")
-        print(f"  - aws_profile: {cfg.aws_profile}")
-        print(f"  - target_size_kb: {cfg.target_size_kb}")
-
-        # Verify defaults
-        assert cfg.bucket == 'two-touch'
-        assert cfg.aws_profile is None
-        assert cfg.target_size_kb == 400
-        print("✓ All defaults correct")
-
-        # Verify file exists and can be read again
-        cfg2 = config.load_config(temp_path)
-        assert cfg2.bucket == cfg.bucket
-        print("✓ Config file persists and reloads correctly")
-
-    finally:
-        # Cleanup
-        if temp_path.exists():
-            temp_path.unlink()
-
-    print()
+def _write_config(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "photo-uploader.yaml"
+    path.write_text(body)
+    return path
 
 
-def test_malformed_yaml():
-    """Test that malformed YAML is handled gracefully."""
-    print("Test 2: Malformed YAML handling")
-    print("-" * 50)
+def test_default_config_creation(tmp_path: Path) -> None:
+    """A missing config file is created with defaults, and reloads identically."""
+    path = tmp_path / "photo-uploader.yaml"
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: two-touch\n")
-        f.write("aws_profile: [\n")  # Malformed - unclosed bracket
+    cfg = config.load_config(path)
 
-    try:
-        cfg = config.load_config(temp_path)
-        print("✗ Should have raised SystemExit")
-    except SystemExit:
-        print("✓ Malformed YAML caught with clear error message")
-    finally:
-        temp_path.unlink()
+    assert path.exists()
+    assert cfg.bucket == "two-touch"
+    assert cfg.aws_profile is None
+    assert cfg.target_size_kb == 400
 
-    print()
-
-
-def test_missing_field():
-    """Test that missing required fields are caught."""
-    print("Test 3: Missing required field")
-    print("-" * 50)
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: two-touch\n")
-        f.write("aws_profile: kurtis-site\n")
-        # Missing target_size_kb
-
-    try:
-        cfg = config.load_config(temp_path)
-        print("✗ Should have raised SystemExit")
-    except SystemExit:
-        print("✓ Missing field caught with clear error message")
-    finally:
-        temp_path.unlink()
-
-    print()
+    # Config has no __eq__, so compare the fields the file round-trips.
+    reloaded = config.load_config(path)
+    assert (reloaded.bucket, reloaded.aws_profile, reloaded.target_size_kb) == (
+        cfg.bucket,
+        cfg.aws_profile,
+        cfg.target_size_kb,
+    )
 
 
-def test_invalid_value():
-    """Test that invalid values are caught."""
-    print("Test 4: Invalid value type")
-    print("-" * 50)
+def test_malformed_yaml(tmp_path: Path) -> None:
+    """Unparseable YAML is rejected rather than silently ignored."""
+    path = _write_config(tmp_path, "bucket: two-touch\naws_profile: [\n")
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: two-touch\n")
-        f.write("aws_profile: kurtis-site\n")
-        f.write("target_size_kb: -100\n")  # Invalid - negative
+    with pytest.raises(SystemExit) as exc_info:
+        config.load_config(path)
 
-    try:
-        cfg = config.load_config(temp_path)
-        print("✗ Should have raised SystemExit")
-    except SystemExit:
-        print("✓ Invalid value caught with clear error message")
-    finally:
-        temp_path.unlink()
-
-    print()
+    assert exc_info.value.code == 1
 
 
-def test_custom_values():
-    """Test loading custom configuration values."""
-    print("Test 5: Custom configuration values")
-    print("-" * 50)
+def test_missing_field(tmp_path: Path) -> None:
+    """A required field left out of the file is rejected."""
+    path = _write_config(tmp_path, "bucket: two-touch\naws_profile: kurtis-site\n")
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: my-custom-bucket\n")
-        f.write("aws_profile: my-profile\n")
-        f.write("target_size_kb: 500\n")
+    with pytest.raises(SystemExit) as exc_info:
+        config.load_config(path)
 
-    try:
-        cfg = config.load_config(temp_path)
-        print(f"✓ Custom config loaded: {cfg}")
-
-        # Verify custom values
-        assert cfg.bucket == 'my-custom-bucket'
-        assert cfg.aws_profile == 'my-profile'
-        assert cfg.target_size_kb == 500
-        print("✓ All custom values correct")
-
-    finally:
-        temp_path.unlink()
-
-    print()
+    assert exc_info.value.code == 1
 
 
-def test_omitted_aws_profile():
-    """Test that omitting aws_profile loads successfully with None."""
-    print("Test 6: Omitted aws_profile defaults to None")
-    print("-" * 50)
+def test_invalid_value(tmp_path: Path) -> None:
+    """A negative target size is rejected."""
+    path = _write_config(
+        tmp_path,
+        "bucket: two-touch\naws_profile: kurtis-site\ntarget_size_kb: -100\n",
+    )
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: two-touch\n")
-        f.write("target_size_kb: 400\n")
-        # aws_profile intentionally omitted
+    with pytest.raises(SystemExit) as exc_info:
+        config.load_config(path)
 
-    try:
-        cfg = config.load_config(temp_path)
-        assert cfg.bucket == 'two-touch'
-        assert cfg.aws_profile is None
-        assert cfg.target_size_kb == 400
-        print("✓ Omitted aws_profile loaded as None")
-    finally:
-        temp_path.unlink()
-
-    print()
+    assert exc_info.value.code == 1
 
 
-def test_empty_aws_profile():
-    """Test that an empty-string aws_profile raises SystemExit."""
-    print("Test 7: Empty aws_profile raises SystemExit")
-    print("-" * 50)
+def test_custom_values(tmp_path: Path) -> None:
+    """Every field is read back from the file."""
+    path = _write_config(
+        tmp_path,
+        "bucket: my-custom-bucket\naws_profile: my-profile\ntarget_size_kb: 500\n",
+    )
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        temp_path = Path(f.name)
-        f.write("bucket: two-touch\n")
-        f.write("aws_profile: ''\n")  # Empty string - invalid if provided
-        f.write("target_size_kb: 400\n")
+    cfg = config.load_config(path)
 
-    try:
-        cfg = config.load_config(temp_path)
-        print("✗ Should have raised SystemExit")
-        assert False, "Empty aws_profile should raise SystemExit"
-    except SystemExit:
-        print("✓ Empty aws_profile caught with clear error message")
-    finally:
-        temp_path.unlink()
-
-    print()
+    assert cfg.bucket == "my-custom-bucket"
+    assert cfg.aws_profile == "my-profile"
+    assert cfg.target_size_kb == 500
 
 
-if __name__ == '__main__':
-    print("=" * 50)
-    print("Config Module Test Suite")
-    print("=" * 50)
-    print()
+def test_omitted_aws_profile(tmp_path: Path) -> None:
+    """``aws_profile`` is optional and defaults to None when absent."""
+    path = _write_config(tmp_path, "bucket: two-touch\ntarget_size_kb: 400\n")
 
-    try:
-        test_default_config_creation()
-        test_malformed_yaml()
-        test_missing_field()
-        test_invalid_value()
-        test_custom_values()
-        test_omitted_aws_profile()
-        test_empty_aws_profile()
+    cfg = config.load_config(path)
 
-        print("=" * 50)
-        print("All tests passed!")
-        print("=" * 50)
+    assert cfg.bucket == "two-touch"
+    assert cfg.aws_profile is None
+    assert cfg.target_size_kb == 400
 
-    except AssertionError as e:
-        print(f"\n✗ Test failed: {e}")
-        raise SystemExit(1)
-    except Exception as e:
-        print(f"\n✗ Unexpected error: {e}")
-        raise SystemExit(1)
+
+def test_empty_aws_profile(tmp_path: Path) -> None:
+    """An empty ``aws_profile`` is a mistake, not the same as omitting it."""
+    path = _write_config(
+        tmp_path,
+        "bucket: two-touch\naws_profile: ''\ntarget_size_kb: 400\n",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        config.load_config(path)
+
+    assert exc_info.value.code == 1

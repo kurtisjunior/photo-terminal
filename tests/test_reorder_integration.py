@@ -1,12 +1,10 @@
 """Integration tests for reorder functionality with processor and uploader."""
 
 import pytest
-import tempfile
-from pathlib import Path
 from PIL import Image
 
-from photo_terminal.reorder import generate_prefixed_filenames
 from photo_terminal.processor import process_images
+from photo_terminal.reorder import generate_prefixed_filenames
 
 
 @pytest.fixture
@@ -15,8 +13,8 @@ def temp_images(tmp_path):
     images = []
     for i in range(1, 4):
         img_path = tmp_path / f"test_image_{i}.jpg"
-        img = Image.new('RGB', (100, 100), color=(i * 50, i * 50, i * 50))
-        img.save(img_path, 'JPEG')
+        img = Image.new("RGB", (100, 100), color=(i * 50, i * 50, i * 50))
+        img.save(img_path, "JPEG")
         images.append(img_path)
     return images
 
@@ -35,9 +33,9 @@ class TestReorderIntegration:
         temp_dir, processed = process_images(
             reordered,
             target_size_kb=400,
-            output_format='JPEG',
+            output_format="JPEG",
             max_dimension=1920,
-            filename_map=filename_map
+            filename_map=filename_map,
         )
 
         try:
@@ -63,9 +61,9 @@ class TestReorderIntegration:
         temp_dir, processed = process_images(
             temp_images,
             target_size_kb=400,
-            output_format='JPEG',
+            output_format="JPEG",
             max_dimension=1920,
-            filename_map=None
+            filename_map=None,
         )
 
         try:
@@ -89,15 +87,15 @@ class TestReorderIntegration:
         temp_dir, processed = process_images(
             temp_images,
             target_size_kb=400,
-            output_format='PNG',
+            output_format="PNG",
             max_dimension=1920,
-            filename_map=filename_map
+            filename_map=filename_map,
         )
 
         try:
             # Check that temp files use PNG extension
             for proc_img in processed:
-                assert proc_img.temp_path.suffix == '.png'
+                assert proc_img.temp_path.suffix == ".png"
 
                 # Upload filename should be based on original name with prefix
                 # but the actual temp file should use the output format
@@ -116,8 +114,8 @@ class TestReorderIntegration:
         img3 = tmp_path / "photo3.jpg"
 
         for img_path in [img1, img2, img3]:
-            img = Image.new('RGB', (100, 100), color='red')
-            img.save(img_path, 'JPEG')
+            img = Image.new("RGB", (100, 100), color="red")
+            img.save(img_path, "JPEG")
 
         images = [img1, img2, img3]
 
@@ -129,9 +127,9 @@ class TestReorderIntegration:
         temp_dir, processed = process_images(
             images,
             target_size_kb=400,
-            output_format='JPEG',
+            output_format="JPEG",
             max_dimension=1920,
-            filename_map=filename_map
+            filename_map=filename_map,
         )
 
         try:

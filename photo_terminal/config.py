@@ -4,9 +4,7 @@ Loads configuration from photo-uploader.yaml with auto-initialization
 on first run. Supports CLI override pattern for all config values.
 """
 
-import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -21,28 +19,26 @@ class Config:
         target_size_kb: Target file size in kilobytes for JPEG optimization
     """
 
-    def __init__(self, bucket: str, aws_profile: Optional[str], target_size_kb: int):
+    def __init__(self, bucket: str, aws_profile: str | None, target_size_kb: int):
         self.bucket = bucket
         self.aws_profile = aws_profile
         self.target_size_kb = target_size_kb
 
     def __repr__(self):
-        return (f"Config(bucket={self.bucket!r}, "
-                f"aws_profile={self.aws_profile!r}, "
-                f"target_size_kb={self.target_size_kb})")
+        return (
+            f"Config(bucket={self.bucket!r}, "
+            f"aws_profile={self.aws_profile!r}, "
+            f"target_size_kb={self.target_size_kb})"
+        )
 
 
 # Default configuration values
-DEFAULT_CONFIG = {
-    'bucket': 'two-touch',
-    'aws_profile': None,
-    'target_size_kb': 400
-}
+DEFAULT_CONFIG = {"bucket": "two-touch", "aws_profile": None, "target_size_kb": 400}
 
-CONFIG_PATH = Path.cwd() / 'photo-uploader.yaml'
+CONFIG_PATH = Path.cwd() / "photo-uploader.yaml"
 
 
-def load_config(config_path: Optional[Path] = None) -> Config:
+def load_config(config_path: Path | None = None) -> Config:
     """Load configuration from YAML file, creating it with defaults if needed.
 
     Args:
@@ -64,55 +60,51 @@ def load_config(config_path: Optional[Path] = None) -> Config:
 
     # Load and parse YAML
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             data = yaml.safe_load(f)
     except yaml.YAMLError as e:
         print(f"Error: Malformed YAML in {config_path}")
         print(f"Details: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     except Exception as e:
         print(f"Error: Could not read config file {config_path}")
         print(f"Details: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # Validate that we got a dictionary
     if not isinstance(data, dict):
-        print(f"Error: Config file must contain a YAML dictionary")
+        print("Error: Config file must contain a YAML dictionary")
         print(f"Got: {type(data).__name__}")
         raise SystemExit(1)
 
     # Extract required fields with validation
     try:
-        bucket = data['bucket']
-        target_size_kb = data['target_size_kb']
+        bucket = data["bucket"]
+        target_size_kb = data["target_size_kb"]
     except KeyError as e:
         print(f"Error: Missing required config field: {e}")
-        print(f"Required fields: bucket, target_size_kb")
-        raise SystemExit(1)
+        print("Required fields: bucket, target_size_kb")
+        raise SystemExit(1) from None
 
     # aws_profile is optional; None (or absent) means boto3 resolves
     # credentials from the environment (e.g. AWS_ACCESS_KEY_ID from .env)
-    aws_profile = data.get('aws_profile')
+    aws_profile = data.get("aws_profile")
 
     # Validate field types
     if not isinstance(bucket, str) or not bucket:
-        print(f"Error: 'bucket' must be a non-empty string")
+        print("Error: 'bucket' must be a non-empty string")
         raise SystemExit(1)
 
     if aws_profile is not None:
         if not isinstance(aws_profile, str) or not aws_profile:
-            print(f"Error: 'aws_profile' must be a non-empty string if provided")
+            print("Error: 'aws_profile' must be a non-empty string if provided")
             raise SystemExit(1)
 
     if not isinstance(target_size_kb, int) or target_size_kb <= 0:
-        print(f"Error: 'target_size_kb' must be a positive integer")
+        print("Error: 'target_size_kb' must be a positive integer")
         raise SystemExit(1)
 
-    return Config(
-        bucket=bucket,
-        aws_profile=aws_profile,
-        target_size_kb=target_size_kb
-    )
+    return Config(bucket=bucket, aws_profile=aws_profile, target_size_kb=target_size_kb)
 
 
 def _create_default_config(config_path: Path) -> None:
@@ -129,9 +121,9 @@ def _create_default_config(config_path: Path) -> None:
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write default config
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, sort_keys=False)
     except Exception as e:
         print(f"Error: Could not create config file at {config_path}")
         print(f"Details: {e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
