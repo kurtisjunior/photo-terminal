@@ -58,6 +58,7 @@ photo-uploader.yaml
 
 # Nix / direnv
 .direnv/
+uv.lock
 
 # AWS (local, isolated credentials)
 .aws/
