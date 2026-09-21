@@ -87,11 +87,9 @@ def test_validate_folder_path_with_file(tmp_path):
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_valid_folder(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -158,11 +156,9 @@ def test_main_with_invalid_folder(capsys):
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="")
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_target_size_override(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_browse_s3,
     mock_confirm,
@@ -222,11 +218,9 @@ def test_main_with_target_size_override(
 )
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_dry_run(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_show_config,
@@ -267,11 +261,9 @@ def test_main_with_dry_run(
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="")
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_without_prefix(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_browse_s3,
     mock_confirm,
@@ -344,11 +336,9 @@ def test_main_without_prefix(
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="japan/tokyo/")
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_interactive_browser_selection(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_browse_s3,
     mock_confirm,
@@ -407,11 +397,9 @@ def test_main_interactive_browser_selection(
     },
 )
 @patch("photo_terminal.__main__.browse_s3_folders", side_effect=SystemExit(1))
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_s3_access_failure(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_show_config,
     mock_input,
@@ -441,11 +429,9 @@ def test_main_s3_access_failure(
     },
 )
 @patch("photo_terminal.__main__.browse_s3_folders", side_effect=SystemExit(1))
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_s3_browser_cancelled(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_show_config,
     mock_input,
@@ -484,11 +470,9 @@ def test_main_s3_browser_cancelled(
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="japan/tokyo/")
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_confirmation_accepted(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_browse_s3,
     mock_confirm,
@@ -556,11 +540,9 @@ def test_main_with_confirmation_accepted(
 )
 @patch("photo_terminal.__main__.confirm_upload", side_effect=SystemExit(1))
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="japan/tokyo/")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_confirmation_rejected(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_show_config,
@@ -600,11 +582,9 @@ def test_main_with_confirmation_rejected(
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="")
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_with_confirmation_root_prefix(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_browse_s3,
     mock_confirm,
@@ -665,11 +645,9 @@ def test_main_with_confirmation_root_prefix(
 @patch("photo_terminal.__main__.dry_run_upload")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_calls_dry_run_when_flag_set(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_dry_run,
@@ -719,11 +697,9 @@ def test_main_calls_dry_run_when_flag_set(
 @patch("photo_terminal.__main__.dry_run_upload")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="japan/tokyo")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_dry_run_with_custom_target_size(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_dry_run,
@@ -765,11 +741,9 @@ def test_main_dry_run_with_custom_target_size(
 @patch("photo_terminal.__main__.dry_run_upload")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_dry_run_with_empty_prefix(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_dry_run,
@@ -811,11 +785,9 @@ def test_main_dry_run_with_empty_prefix(
 @patch("photo_terminal.__main__.dry_run_upload")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_dry_run_with_multiple_images(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_dry_run,
@@ -857,11 +829,9 @@ def test_main_dry_run_with_multiple_images(
 )
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_main_without_dry_run_flag_does_not_call_dry_run(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_show_config,
@@ -902,11 +872,9 @@ def test_main_without_dry_run_flag_does_not_call_dry_run(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_full_workflow_success(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -981,11 +949,9 @@ def test_full_workflow_success(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_fails_on_duplicates(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -1034,11 +1000,9 @@ def test_workflow_fails_on_duplicates(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_fails_on_processing_error(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -1087,11 +1051,9 @@ def test_workflow_fails_on_processing_error(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_fails_on_upload_error(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -1161,11 +1123,9 @@ def test_workflow_fails_on_upload_error(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_with_insufficient_disk_space(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,
@@ -1221,11 +1181,9 @@ def test_workflow_with_insufficient_disk_space(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_with_root_prefix(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_check_duplicates,
@@ -1294,11 +1252,9 @@ def test_workflow_with_root_prefix(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.s3_browser.validate_s3_access")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_workflow_succeeds_even_if_summary_fails(
     mock_run,
-    mock_viu_check,
     mock_s3_access,
     mock_confirm,
     mock_check_duplicates,

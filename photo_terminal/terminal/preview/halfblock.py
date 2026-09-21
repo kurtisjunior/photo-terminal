@@ -4,8 +4,10 @@ Converts images to colored Unicode half-block characters (▄) using 24-bit ANSI
 escape codes. Each terminal cell represents two vertical pixels: the top pixel
 as the background color and the bottom pixel as the foreground color.
 
-This replaces shelling out to the `viu` subprocess for block-mode rendering,
-reducing preview latency from ~100-300ms down to ~10-30ms by staying in-process.
+Rendering in-process rather than shelling out to an external viewer keeps
+preview latency at ~10-30ms instead of ~100-300ms, and - more importantly - it
+means the output is a list of lines this program can count, anchor and erase,
+rather than an opaque byte blob replayed uninspected.
 
 Algorithm (standard half-block technique used by pixterm, ansipix, climage, etc.):
     1. Open image with PIL and convert to RGB

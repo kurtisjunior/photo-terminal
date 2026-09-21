@@ -15,17 +15,17 @@ You are responsible for implementing and maintaining the Terminal Image Upload M
 A terminal-based image upload manager with two-pane TUI interface for interactive file selection, inline preview, and batch JPEG optimization for S3 uploads. Personal photography workflow tool with fail-fast error handling and minimal UI.
 
 **Project ID**: 4d942c5e
-**Stack**: Python 3.12+, Pillow, boto3, viu, rich/textual
+**Stack**: Python 3.12+, Pillow, boto3, rich
 **AWS Profile**: kurtis-site
 **Target Bucket**: two-touch
 
 ## Core Requirements
 
 ### Hard Requirements
-- viu installed and working (no fallback mode)
 - AWS CLI configured with kurtis-site profile
 - Terminal supports 256+ colors
-- Two-pane TUI: file list (left), viu preview (right)
+- Two-pane TUI: file list (left), image preview (right)
+- Previews rendered in-process: Kitty graphics protocol on Kitty/Ghostty/WezTerm, ANSI half-blocks elsewhere
 - Fail-fast error handling throughout
 
 ### Supported Formats
@@ -83,7 +83,6 @@ Follow the 12-step implementation order in SPEC.md:
 ## Testing Requirements
 
 ### Pre-Flight Checks
-- [ ] viu availability on startup
 - [ ] AWS credentials test (ListBucket)
 - [ ] Temp directory space check
 - [ ] Empty folder detection
@@ -101,14 +100,13 @@ Follow the 12-step implementation order in SPEC.md:
 - [ ] 'a' key selects/deselects all
 - [ ] Enter locks/unlocks selections
 - [ ] 'n' proceeds to next stage when locked
-- [ ] viu preview updates on navigation
+- [ ] Preview updates on navigation, aspect-correct and inside the right-hand pane
 - [ ] Processing config shows all options (resize, EXIF, format)
 - [ ] Spacebar cycles through output formats
 - [ ] S3 folder browser shows hierarchy
 - [ ] Dry-run shows size comparison with output format
 
 ### Error Scenarios
-- [ ] viu not installed → clear error + install instructions
 - [ ] AWS credentials missing → fail with CLI config instructions
 - [ ] Duplicate in S3 → fail with list of conflicts
 - [ ] Network failure → preserve temp files for retry

@@ -25,11 +25,26 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 - **AWS credentials** — a `.env` file with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (recommended) or an AWS CLI profile
 - Terminal supporting 256+ colors
 
+### Terminals and previews
+
+Previews are rendered in-process. There is no external image viewer to install.
+
+| Terminal | Preview | How |
+|---|---|---|
+| Ghostty, Kitty, WezTerm | Photographic | Native [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) placement, emitted from Python |
+| iTerm2, Sixel terminals, Terminal.app, xterm | ANSI half-blocks | Pillow, 24-bit colour, two pixels per row |
+| Inside tmux or screen | ANSI half-blocks | A multiplexer will not pass a graphics placement through |
+
+The preview is aspect-correct, never upscaled past the source's own resolution,
+and bounded to the right-hand pane at every terminal size. Below 20 columns or
+10 rows of usable pane it is replaced by a short message.
+
 ### Python Dependencies
 
-- Pillow (image processing)
+- Pillow (image processing and preview rendering)
 - boto3 (AWS S3)
 - PyYAML (configuration)
+- rich (completion summary and dry-run report)
 
 ## Installation
 
@@ -563,7 +578,14 @@ photo-terminal/
 │   ├── config.py            # YAML configuration management
 │   ├── scanner.py           # Image format validation
 │   ├── tui.py               # Two-pane image selector with multi-stage workflow
+│   ├── reorder_ui.py        # Interactive reorder screen
 │   ├── input_utils.py       # Keyboard input utilities
+│   ├── terminal/            # The only package that writes to stdout
+│   │   ├── capabilities.py  # GraphicsProtocol detection
+│   │   ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
+│   │   ├── layout.py        # The two-pane split, computed in one place
+│   │   ├── frame.py         # Buffered painter: one write, one flush
+│   │   └── preview/         # Kitty emitter, half-block renderer, cache + workers
 │   ├── s3_browser.py        # Interactive S3 folder browser
 │   ├── confirmation.py      # Upload confirmation prompt
 │   ├── optimizer.py         # Multi-format image optimization

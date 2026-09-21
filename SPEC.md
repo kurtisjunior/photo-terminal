@@ -13,7 +13,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 ### Included Features
 
 - Multi-stage workflow with selection locking (Stage 1: select, Stage 2: configure, Stage 3: browse)
-- Two-pane TUI with file list (left) and viu preview (right) for image selection
+- Two-pane TUI with file list (left) and in-process image preview (right) for image selection
 - Asynchronous preview rendering with loading indicator on cache misses
 - Processing configuration screen (resize, EXIF preservation, output format)
 - Output format selection (JPEG, PNG, WEBP) with format-specific optimization
@@ -35,12 +35,12 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 - Database integration
 - Web interface or API
 - Batch selection shortcuts (manual curation only)
-- Graceful degradation without viu (hard requirement)
+- iTerm2 inline-image and Sixel emitters (both terminals get the half-block preview)
 
 ## Assumptions
 
 - User has AWS CLI configured with profile (kurtis-site) and credentials
-- Terminal supports 256+ colors and viu is installed (hard requirement) - [viu](https://github.com/atanunq/viu)
+- Terminal supports 256+ colors. Previews are rendered in-process: the [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) on Kitty, Ghostty and WezTerm, ANSI half-blocks everywhere else. No external binary is required.
 - Source images are in standard web formats only: JPEG, PNG, WEBP, TIFF, BMP, GIF
 - Target S3 bucket (two-touch) exists with location-based folder structure (japan/, italy/, etc.)
 - AWS permissions configured for ListBucket and PutObject operations
@@ -64,7 +64,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
    - Fail-fast on empty folders
    - Only show valid, processable images to user
 
-4. **Build two-pane TUI with file list (left) and viu preview (right)**
+4. **Build two-pane TUI with file list (left) and image preview (right)**
    - Core UX requirement: navigable list with checkboxes, live preview on right
    - Preview rendering is asynchronous with a loading indicator on cache misses
    - Arrow keys navigate, spacebar toggles selection, enter confirms
@@ -104,11 +104,11 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ## Risks and Mitigations
 
-### viu not installed or terminal incompatibility
-**Mitigation**: Check for viu availability on startup with clear error message and installation instructions. No fallback since visual preview is core requirement.
+### Terminal does not support a graphics protocol
+**Mitigation**: Detect the protocol from the environment and render half-blocks when there is no Kitty support, including inside tmux and screen. Both paths are in-process, so there is nothing to install and nothing to fail at startup. A preview box under 20 columns or 10 rows is suppressed with a message rather than drawn as a few unreadable cells.
 
 ### Large high-resolution images may cause slow preview rendering
-**Mitigation**: viu handles scaling automatically. Preview rendering is asynchronous with a loading indicator, so navigation remains responsive and the preview updates when ready.
+**Mitigation**: Pillow resizes the source to exactly the placement rectangle, which is a whole number of terminal cells, so the terminal has nothing left to scale. Preview rendering is asynchronous with a loading indicator, so navigation remains responsive and the preview updates when ready.
 
 ### Reorder interface preview lag
 **Mitigation**: Reorder previews use the same asynchronous rendering path with a loading indicator to keep navigation responsive.
@@ -179,7 +179,7 @@ YAML file (~/.photo-uploader.yaml) auto-created with defaults. CLI args override
 Python tempfile.TemporaryDirectory for processed images. Automatic cleanup on success. Persistence on failure enables retry without reprocessing.
 
 ### Dependencies
-viu is hard requirement (no fallback mode). Pillow for processing, boto3 for S3, rich for TUI, PyYAML for config.
+No external binaries. Pillow for processing and preview rendering, boto3 for S3, rich for the non-interactive reports, PyYAML for config. Previews are emitted from Python: the Kitty graphics protocol on Kitty/Ghostty/WezTerm, ANSI half-blocks elsewhere.
 
 ### Output Formats
 User selects output format in Stage 2 (Processing Configuration):

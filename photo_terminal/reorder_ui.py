@@ -1,11 +1,17 @@
 """Interactive UI for image reordering with visual preview.
 
 Uses the same two-pane rendering as Stage 1 (tui.py) with grab-and-drop reordering.
+
+Phase 2 note: this screen still owns its own executor, cache and notify pipe,
+and still paints half-blocks on every terminal. Phase 4 dissolves it onto the
+shared ``ListView`` and ``PreviewService``, at which point it gets the same
+native placements the select screen has. What changed here is only that it no
+longer shells out to an external viewer, so its preview is produced by the same
+in-process renderer everywhere.
 """
 
 import functools
 import os
-import subprocess
 import sys
 import termios
 import threading
@@ -20,13 +26,13 @@ from photo_terminal.input_utils import (
     KEY_UP,
     read_key_with_timeout_or_signal,
 )
-from photo_terminal.renderer import render_image_to_ansi
 from photo_terminal.reorder import (
     ImageReorderer,
     generate_prefixed_filenames,
     get_final_filenames_preview,
 )
-from photo_terminal.tui import TerminalCapabilities, check_viu_availability
+from photo_terminal.terminal.capabilities import GraphicsProtocol, detect_graphics_protocol
+from photo_terminal.terminal.preview.halfblock import render_image_to_ansi
 
 
 class ReorderImageSelector:
@@ -44,7 +50,7 @@ class ReorderImageSelector:
         self.reorderer = ImageReorderer(images)
         self._image_cache: dict[str, list[str]] = {}
         self._first_render = True
-        self._protocol = TerminalCapabilities.detect_graphics_protocol()
+        self._protocol: GraphicsProtocol = detect_graphics_protocol()
         self._preview_executor = ThreadPoolExecutor(max_workers=4)
         self._preview_futures: dict[str, Future[list[str]]] = {}
         self._preview_lock = threading.Lock()
@@ -54,16 +60,14 @@ class ReorderImageSelector:
         self._last_preview_key: str | None = None
         self._last_preview_cached = False
 
-    def _schedule_preview(
-        self, cache_key: str, image_path: Path, width: int, height: int, use_blocks: bool
-    ) -> None:
+    def _schedule_preview(self, cache_key: str, image_path: Path, width: int, height: int) -> None:
         if cache_key in self._image_cache:
             return
         with self._preview_lock:
             if cache_key in self._preview_futures:
                 return
             future = self._preview_executor.submit(
-                self._render_preview_output, image_path, width, height, use_blocks
+                self._render_preview_output, image_path, width, height
             )
             self._preview_futures[cache_key] = future
         future.add_done_callback(functools.partial(self._store_preview_result, cache_key))
@@ -84,28 +88,18 @@ class ReorderImageSelector:
                 pass
 
     @staticmethod
-    def _render_preview_output(image_path: Path, width: int, height: int, use_blocks: bool):
-        if use_blocks:
-            return render_image_to_ansi(image_path, width, height)
-
-        cmd = ["viu", "-w", str(width), "-h", str(height), str(image_path)]
-
-        result = subprocess.run(cmd, capture_output=True, text=False, timeout=3)
-        if result.returncode == 0:
-            return result.stdout.decode("utf-8", errors="replace").splitlines()
-        error_msg = result.stderr.decode("utf-8", errors="replace").strip()
-        return [f"[Preview error: {error_msg}]"]
+    def _render_preview_output(image_path: Path, width: int, height: int) -> list[str]:
+        return render_image_to_ansi(image_path, width, height)
 
     def _get_preview_lines(self, image_path: Path, width: int, height: int) -> list[str]:
         """Get cached preview lines for an image (same as tui.py)."""
         # Detect if we should use graphics protocol or blocks
-        use_blocks = self._protocol == "blocks"
-        cache_key = f"{'blocks' if use_blocks else 'graphics'}:{image_path}:{width}:{height}"
+        cache_key = f"{self._protocol.value}:{image_path}:{width}:{height}"
 
         if cache_key in self._image_cache:
             return self._image_cache[cache_key]
 
-        self._schedule_preview(cache_key, image_path, width, height, use_blocks)
+        self._schedule_preview(cache_key, image_path, width, height)
         return ["[Loading preview...]"]
 
     def _create_file_list_lines(self) -> list[str]:
@@ -186,10 +180,7 @@ class ReorderImageSelector:
         current_image = images[current_idx]
 
         # Determine if preview needs updating
-        use_blocks = self._protocol == "blocks"
-        cache_key = (
-            f"{'blocks' if use_blocks else 'graphics'}:{current_image}:{image_width}:{image_height}"
-        )
+        cache_key = f"{self._protocol.value}:{current_image}:{image_width}:{image_height}"
         cache_hit = cache_key in self._image_cache
         preview_changed = (cache_key != self._last_preview_key) or (
             cache_hit and not self._last_preview_cached
@@ -231,7 +222,6 @@ class ReorderImageSelector:
         """Pre-load adjacent images in background."""
         images = self.reorderer.get_ordered_images()
         idx = self.reorderer.get_current_index()
-        use_blocks = self._protocol == "blocks"
         terminal_size = os.get_terminal_size()
         image_column = 56
         image_width = max(40, min(terminal_size.columns - image_column - 2, 70))
@@ -241,8 +231,8 @@ class ReorderImageSelector:
             target = idx + offset
             if 0 <= target < len(images):
                 img_path = images[target]
-                cache_key = f"{'blocks' if use_blocks else 'graphics'}:{img_path}:{image_width}:{image_height}"
-                self._schedule_preview(cache_key, img_path, image_width, image_height, use_blocks)
+                cache_key = f"{self._protocol.value}:{img_path}:{image_width}:{image_height}"
+                self._schedule_preview(cache_key, img_path, image_width, image_height)
 
     def run(self) -> list[tuple[Path, str]] | None:
         """Run the interactive reorder UI.
@@ -251,10 +241,6 @@ class ReorderImageSelector:
             List of (original_path, prefixed_filename) tuples if confirmed,
             None if cancelled
         """
-        # Check viu availability
-        if not check_viu_availability():
-            print("Warning: viu not available, preview will be limited")
-
         # Save terminal settings
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)

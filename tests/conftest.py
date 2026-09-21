@@ -1,19 +1,18 @@
 """Shared test fixtures and terminal test doubles.
 
-Three things live here:
+Two things live here:
 
-1. Real image fixtures. Every image the suite renders now has actual pixels in
-   it. The previous `.touch()`ed zero-byte files could not be opened by any
+1. Real image fixtures. Every image the suite renders has actual pixels in it.
+   The previous `.touch()`ed zero-byte files could not be opened by any
    renderer, which is a large part of why a completely broken render path sat
    under a green suite.
 2. ``FakeTerminal`` - a recorder that accepts the bytes a screen writes and
    reconstructs what they mean, so a test can assert on placement geometry and
    on where the cursor actually went.
-3. A recorded ``viu`` block-fallback capture, so the current defect mechanism
-   can be pinned deterministically on a machine that has no ``viu`` installed.
 
-``Size``, ``Point`` and ``Rect`` are defined here for now. Phase 2 moves them
-into ``photo_terminal/terminal/geometry.py`` and this module imports them.
+The geometry primitives it reconstructs into now come from the production
+package, so a test and the code under test cannot disagree about what a cell
+coordinate is.
 """
 
 from __future__ import annotations
@@ -23,11 +22,18 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
 
 import pytest
 
+from photo_terminal.terminal.geometry import CellMetrics, Point, Size
+from photo_terminal.terminal.layout import PREVIEW_LEFT
+from photo_terminal.terminal.preview.service import PreviewService
+
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# A measured 8x16 cell: the shape a terminal reporting its pixel dimensions
+# would give us, and the shape the half-block renderer assumes by construction.
+MEASURED_CELL = CellMetrics(px=Size(8, 16), measured=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -60,77 +66,27 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
-# --------------------------------------------------------------------------- #
-# Geometry primitives
-# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def close_preview_services(monkeypatch: pytest.MonkeyPatch):
+    """Close every :class:`PreviewService` a test constructs.
 
-
-class Size(NamedTuple):
-    """A width/height pair. Units are stated by the field that holds it."""
-
-    w: int
-    h: int
-
-
-class Point(NamedTuple):
-    """A 1-based cell coordinate, matching ANSI cursor addressing."""
-
-    col: int
-    row: int
-
-
-@dataclass(frozen=True)
-class Rect:
-    """A 1-based, inclusive-origin rectangle of terminal cells."""
-
-    left: int
-    top: int
-    width: int
-    height: int
-
-    @property
-    def origin(self) -> Point:
-        return Point(self.left, self.top)
-
-    @property
-    def cells(self) -> frozenset[Point]:
-        return frozenset(
-            Point(col, row)
-            for row in range(self.top, self.top + self.height)
-            for col in range(self.left, self.left + self.width)
-        )
-
-    def __or__(self, other: Rect | frozenset[Point]) -> frozenset[Point]:
-        return self.cells | (other.cells if isinstance(other, Rect) else other)
-
-    __ror__ = __or__
-
-
-@dataclass(frozen=True)
-class ExpectedLayout:
-    """The geometry the preview is *supposed* to respect.
-
-    This encodes the intended two-pane split so a test can assert on it before
-    the production code has a single source of truth for it. Phase 2 replaces
-    this with ``photo_terminal.terminal.layout.Layout``.
+    A screen owns its service for its own lifetime and closes it in ``run()``'s
+    ``finally``. A test that builds a screen without running it would otherwise
+    leak the service's pipe pair - two descriptors per construction, growing with
+    the suite. ``close()`` is idempotent, so a test that closes its own service
+    is unaffected.
     """
+    created: list[PreviewService] = []
+    original = PreviewService.__init__
 
-    list_pane: Rect
-    preview_box: Rect
+    def tracking_init(service: PreviewService, *args: object, **kwargs: object) -> None:
+        original(service, *args, **kwargs)  # type: ignore[arg-type]
+        created.append(service)
 
-    @classmethod
-    def for_terminal(cls, size: os.terminal_size) -> ExpectedLayout:
-        list_width = 55
-        preview_left = 60
-        return cls(
-            list_pane=Rect(left=1, top=1, width=list_width, height=size.lines),
-            preview_box=Rect(
-                left=preview_left,
-                top=1,
-                width=max(0, size.columns - preview_left - 1),
-                height=max(0, size.lines - 2),
-            ),
-        )
+    monkeypatch.setattr(PreviewService, "__init__", tracking_init)
+    yield
+    for service in created:
+        service.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -157,7 +113,7 @@ class FakeTerminal:
     # What TIOCGWINSZ would have reported; None means the pixel fields were zero.
     cell_px: Size | None = None
     # The column the preview is anchored at, used by preview_payload().
-    preview_column: int = 60
+    preview_column: int = PREVIEW_LEFT
     _buffer: bytearray = field(default_factory=bytearray, repr=False)
 
     # -- writing ---------------------------------------------------------- #
@@ -348,24 +304,13 @@ class _ByteStream:
 @pytest.fixture
 def fake_term() -> FakeTerminal:
     """A recorder sized to the 178x58 window from the bug report screenshot."""
-    return FakeTerminal(size=os.terminal_size((178, 58)))
+    return FakeTerminal(size=os.terminal_size((178, 58)), cell_px=MEASURED_CELL.px)
 
 
 @pytest.fixture
-def viu_block_capture() -> bytes:
-    r"""Real ``viu`` 1.6.1 output captured with stdout on a pipe.
-
-    Recorded with::
-
-        env -i TERM=xterm-ghostty TERM_PROGRAM=ghostty COLORTERM=truecolor \
-            viu -w 116 -h 56 tests/fixtures/portrait_3x4.jpg > viu_block_capture.bin
-
-    116x56 cells is what the current graphics path asks for on a 178x58
-    terminal. The capture opens with viu's 35-byte Kitty capability probe plus
-    the ``\x1b[c`` DA1 fallback, contains no ``a=T`` placement anywhere, and
-    continues as 56 rows of 116 half-block cells separated by ``\r\n``.
-    """
-    return (FIXTURES / "viu_block_capture.bin").read_bytes()
+def measured_cell() -> CellMetrics:
+    """An 8x16 cell, as a terminal that reports its pixel dimensions would."""
+    return MEASURED_CELL
 
 
 @pytest.fixture

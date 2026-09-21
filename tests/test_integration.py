@@ -39,11 +39,9 @@ def folder_with_images(tmp_path):
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="test/prefix/")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_cli_integrates_with_config(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_check_duplicates,
@@ -114,11 +112,9 @@ def test_cli_integrates_with_config(
 @patch("photo_terminal.__main__.check_for_duplicates")
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="test/")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_cli_overrides_config_values(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_check_duplicates,
@@ -196,11 +192,9 @@ def test_cli_overrides_config_values(
 )
 @patch("photo_terminal.__main__.confirm_upload", return_value=True)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="test/")
-@patch("photo_terminal.tui.check_viu_availability", return_value=True)
 @patch("photo_terminal.tui.ImageSelector.run")
 def test_dry_run_flag_integration(
     mock_run,
-    mock_viu_check,
     mock_browse_s3,
     mock_confirm,
     mock_show_config,

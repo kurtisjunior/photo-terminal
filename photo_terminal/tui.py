@@ -1,28 +1,29 @@
-"""Two-pane TUI for interactive image selection with viu preview.
+"""Two-pane TUI for interactive image selection with an inline image preview.
 
 Provides a terminal interface with:
 - File list (left pane) with checkboxes and navigation
-- Live viu preview (right pane) showing selected image
+- Live preview (right pane) showing the highlighted image, as a native Kitty
+  graphics placement on Kitty/Ghostty/WezTerm and as ANSI half-blocks elsewhere
 - Multi-stage selection workflow:
   1. Mark images with y/Space (shows [x])
   2. Lock selections with Enter (prevents accidental changes)
   3. Proceed to next stage with 'n'
 - Keyboard controls: arrows to navigate, y/spacebar to mark, a to select all, enter to lock, n to proceed
+
+Rendering has no per-mode branching left in it. One :class:`Layout` says where
+everything goes, :class:`~photo_terminal.terminal.preview.service.PreviewService`
+produces a :class:`~photo_terminal.terminal.preview.frames.PreviewFrame`, and the
+screen paints and erases frames without ever learning which kind it holds.
 """
 
-import functools
 import logging
 import os
 import re
-import shutil
-import subprocess
 import sys
-import threading
-from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -33,7 +34,18 @@ from photo_terminal.input_utils import (
     KEY_UP,
     read_key_with_timeout_or_signal,
 )
-from photo_terminal.renderer import render_image_to_ansi
+from photo_terminal.terminal.capabilities import detect_graphics_protocol
+from photo_terminal.terminal.frame import (
+    CLEAR_AND_HOME,
+    HIDE_CURSOR,
+    HOME,
+    SHOW_CURSOR,
+    Frame,
+)
+from photo_terminal.terminal.geometry import CellMetrics, Point
+from photo_terminal.terminal.layout import Layout
+from photo_terminal.terminal.preview.frames import MessageFrame, PreviewFrame
+from photo_terminal.terminal.preview.service import PreviewService
 
 # Pre-compiled regex for stripping ANSI escape codes (hot path optimisation)
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
@@ -41,164 +53,15 @@ _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 # Set up logging
 logger = logging.getLogger(__name__)
 
+FALLBACK_TERMINAL_SIZE = os.terminal_size((120, 40))
 
-class TerminalCapabilities:
-    """Detect and manage terminal graphics capabilities.
+LOADING_MESSAGE = "[Loading preview...]"
+TOO_SMALL_MESSAGE = "[Preview: window too small]"
 
-    This class provides methods to detect which graphics protocol (if any) the
-    current terminal supports for inline image rendering. Detection is automatic and
-    heuristic-based, and may produce false positives on older terminal versions.
-
-    Supported terminals:
-    - iTerm2 (iTerm2 inline image protocol)
-    - Ghostty (Kitty graphics protocol)
-    - Kitty (Kitty graphics protocol)
-    - Sixel-capable terminals (Sixel protocol)
-    - All other terminals (Unicode block fallback)
-
-    Important notes:
-    - Detection is automatic based on environment variables
-    - Older versions of terminals may be detected as supporting protocols they don't
-    - Terminal multiplexers (tmux, screen) force block mode as fallback
-    """
-
-    @staticmethod
-    def detect_graphics_protocol() -> str:
-        """Detect which graphics protocol is supported by the terminal.
-
-        Automatic detection order:
-        1. Check for terminal multiplexers (tmux/screen) - forces 'blocks' if detected
-        2. Check TERM_PROGRAM for iTerm2 - returns 'iterm' if detected
-        3. Check TERM_PROGRAM for Ghostty or 'ghostty' in TERM - returns 'kitty' if detected
-        4. Check TERM for Kitty - returns 'kitty' if detected
-        5. Check TERM for Sixel - returns 'sixel' if detected
-        6. Fallback to 'blocks' for universal compatibility
-
-        Note: These are heuristic checks based on environment variables. They may
-        false-positive on older terminal versions that set these variables but don't
-        fully support the graphics protocols. Ghostty supports the Kitty graphics
-        protocol, so it returns 'kitty' when detected.
-
-        Terminal multiplexers (tmux, screen) typically don't support graphics protocols,
-        so they force block mode as a fallback.
-
-        Returns:
-            str: One of 'iterm', 'kitty', 'sixel', or 'blocks'
-        """
-        # Check for terminal multiplexers first
-        # TMUX is set when inside tmux, STY is set when inside GNU screen
-        # They typically break graphics protocols
-        if os.environ.get("TMUX") or os.environ.get("STY"):
-            return "blocks"
-
-        # Proceed with protocol detection
-        term_program = os.environ.get("TERM_PROGRAM", "")
-        term = os.environ.get("TERM", "")
-
-        # iTerm2 detection (heuristic, may false-positive on older versions)
-        if term_program == "iTerm.app":
-            return "iterm"
-
-        # Ghostty detection (uses Kitty graphics protocol)
-        if term_program == "ghostty" or "ghostty" in term:
-            return "kitty"
-
-        # Kitty detection (heuristic)
-        if "kitty" in term or term == "xterm-kitty":
-            return "kitty"
-
-        # Sixel detection (heuristic; TERM doesn't guarantee sixel support)
-        if "sixel" in term:
-            return "sixel"
-
-        # Fallback to blocks for universal compatibility
-        return "blocks"
-
-    @staticmethod
-    def supports_inline_images() -> bool:
-        """Check if terminal supports any inline image protocol.
-
-        Returns:
-            bool: True if terminal supports iTerm2, Kitty, or Sixel protocols,
-                  False if only block-mode rendering is available
-        """
-        protocol = TerminalCapabilities.detect_graphics_protocol()
-        return protocol in ("iterm", "kitty", "sixel")
-
-
-def check_viu_availability() -> bool:
-    """Check if viu is available on the system.
-
-    Returns:
-        True if viu is found, False otherwise
-    """
-    return shutil.which("viu") is not None
-
-
-def fail_viu_not_found() -> None:
-    """Print error message about viu not being installed and exit.
-
-    Raises:
-        SystemExit: Always exits with code 1
-    """
-    print("Error: viu is not installed")
-    print()
-    print("viu is required for image preview in the terminal.")
-    print()
-    print("Installation instructions:")
-    print("  macOS:   brew install viu")
-    print("  Linux:   cargo install viu  (or use your package manager)")
-    print()
-    print("More info: https://github.com/atanunq/viu")
-    raise SystemExit(1)
-
-
-def get_viu_preview(image_path: Path, width: int, height: int | None = None) -> str:
-    """Generate viu preview output for an image.
-
-    Args:
-        image_path: Path to image file
-        width: Width in characters for preview
-        height: Maximum height in lines (optional, will be cropped if exceeded)
-
-    Returns:
-        String containing viu output with ANSI escape codes
-    """
-    logger.debug(f"get_viu_preview: {image_path.name}, width={width}, height={height}")
-    try:
-        # Run viu with appropriate flags
-        # -b: force block output (ANSI colors instead of graphics protocols)
-        # -w: width in terminal columns (viu will calculate height for aspect ratio)
-        # Don't use -h to let viu maintain proper aspect ratio, crop afterwards if needed
-        logger.debug("Running viu subprocess...")
-        result = subprocess.run(
-            ["viu", "-b", "-w", str(width), str(image_path)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        logger.debug(f"viu completed with returncode={result.returncode}")
-
-        if result.returncode == 0:
-            output = result.stdout
-            logger.debug(f"viu output: {len(output)} chars, {len(output.splitlines())} lines")
-            # Crop to max height if specified
-            if height:
-                lines = output.splitlines()
-                if len(lines) > height:
-                    output = "\n".join(lines[:height])
-                    logger.debug(f"Cropped to {height} lines")
-            return output
-        else:
-            logger.error(f"viu failed: {result.stderr}")
-            return f"[Error rendering preview]\n{result.stderr}"
-
-    except subprocess.TimeoutExpired:
-        logger.error("viu timed out")
-        return "[Preview timed out]"
-    except Exception as e:
-        logger.error(f"viu exception: {e}", exc_info=True)
-        return f"[Preview error: {e}]"
+# Which neighbours to warm after each render, in the order a user is most likely
+# to need them.
+PRELOAD_OFFSETS = (1, -1, 2, -2)
+STARTUP_PRELOAD = 5
 
 
 class ImageSelector:
@@ -213,105 +76,63 @@ class ImageSelector:
         self.images = images
         self.selected_indices: set[int] = set()  # Set of selected image indices
         self.current_index = 0  # Currently highlighted image
-        self.console = Console(color_system="truecolor", force_terminal=True)
-        self._first_render = True  # Track first render for graphics protocol mode
-        # Cache for rendered image output, keyed by "<mode>:<path>:<w>:<h>".
-        self._image_cache: dict[str, bytes | list[str]] = {}
+        self._first_render = True
         self._selections_locked = False  # Track if selections are locked
         self._locked_indices: set[int] = set()  # Store locked selection indices
-        self._preview_executor = ThreadPoolExecutor(max_workers=4)
-        self._preview_futures: dict[str, Future[bytes | list[str]]] = {}
-        self._preview_lock = threading.Lock()
-        self._preview_dirty = False
-        self._last_preview_key: str | None = None
-        self._last_preview_cached = False  # Whether last preview render was from cache
-        self._notify_r, self._notify_w = os.pipe()
-        os.set_blocking(self._notify_r, False)
-        self._protocol = TerminalCapabilities.detect_graphics_protocol()
-        try:
-            self._terminal_size = os.get_terminal_size()
-        except OSError:
-            self._terminal_size = os.terminal_size((120, 40))
 
-    def _schedule_preview(
-        self, cache_key: str, image_path: Path, width: int, height: int, mode: str
-    ) -> None:
-        """Schedule preview rendering if not already cached or in flight."""
-        if cache_key in self._image_cache:
-            return
-        with self._preview_lock:
-            if cache_key in self._preview_futures:
-                return
-            future = self._preview_executor.submit(
-                self._render_preview_output, image_path, width, height, mode
-            )
-            self._preview_futures[cache_key] = future
-        future.add_done_callback(functools.partial(self._store_preview_result, cache_key))
+        self._protocol = detect_graphics_protocol()
+        self._cell = _probe_cell_metrics()
+        self._terminal_size = _sample_terminal_size()
+        self._preview = PreviewService(self._protocol, self._cell)
 
-    def _store_preview_result(self, cache_key: str, future: Future[Any]) -> None:
-        """Store preview render result and mark UI dirty."""
-        try:
-            output = future.result()
-        except Exception as e:
-            if cache_key.startswith("graphics:"):
-                output = f"[Preview error: {e}]".encode("utf-8", errors="replace")
-            else:
-                output = [f"[Preview error: {e}]"]
-        with self._preview_lock:
-            self._preview_futures.pop(cache_key, None)
-            if output is not None:
-                if cache_key.startswith("graphics:") and isinstance(output, list):
-                    output = "\n".join(output).encode("utf-8", errors="replace")
-                if cache_key.startswith("blocks:") and isinstance(output, bytes):
-                    output = output.decode("utf-8", errors="replace").splitlines()
-                self._image_cache[cache_key] = output
-            self._preview_dirty = True
-            try:
-                os.write(self._notify_w, b"\x00")
-            except OSError:
-                pass
+        # What is currently on screen, so it can be erased before the next
+        # preview is painted. Text erasure does not remove a graphics
+        # placement, so this is the only thing that can.
+        self._painted: PreviewFrame | None = None
+        self._painted_at: Point | None = None
+        self._painted_token: tuple[object, ...] | None = None
 
-    def _render_preview_output(self, image_path: Path, width: int, height: int, mode: str):
-        """Render preview output via viu (blocks or graphics)."""
-        if mode == "graphics":
-            result = subprocess.run(
-                ["viu", "-w", str(width), "-h", str(height), str(image_path)],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return result.stdout
-            error_msg = result.stderr.decode("utf-8", errors="replace").strip()
-            return f"[Preview error: {error_msg}]".encode("utf-8", errors="replace")
+    # -- state ------------------------------------------------------------ #
 
-        # Block mode: use in-process Pillow renderer (no subprocess overhead)
-        return render_image_to_ansi(image_path, width, height)
+    def toggle_selection(self) -> None:
+        """Toggle selection state of current image."""
+        if self.current_index in self.selected_indices:
+            self.selected_indices.remove(self.current_index)
+        else:
+            self.selected_indices.add(self.current_index)
 
-    @staticmethod
-    def _loading_lines(width: int, height: int) -> list[str]:
-        """Create a placeholder preview to avoid blocking on render."""
-        if height <= 0:
-            return ["[Loading preview...]"]
-        lines = [" " * width for _ in range(height)]
-        lines[0] = "[Loading preview...]"
-        return lines
+    def move_up(self) -> None:
+        """Move selection cursor up."""
+        if self.current_index > 0:
+            self.current_index -= 1
+
+    def move_down(self) -> None:
+        """Move selection cursor down."""
+        if self.current_index < len(self.images) - 1:
+            self.current_index += 1
+
+    def get_selected_images(self) -> list[Path]:
+        """Get list of selected image paths.
+
+        Returns:
+            List of selected image paths in order
+        """
+        return [self.images[i] for i in sorted(self.selected_indices)]
+
+    # -- the file list ---------------------------------------------------- #
 
     @staticmethod
     def _visible_len(text: str) -> int:
         """Calculate visible length of text excluding ANSI escape codes."""
         return len(_ANSI_ESCAPE_RE.sub("", text))
 
-    @staticmethod
-    def _pad_line(text: str, width: int) -> str:
+    @classmethod
+    def _pad_line(cls, text: str, width: int) -> str:
         """Pad text with spaces to a fixed visible width."""
-        visible = len(_ANSI_ESCAPE_RE.sub("", text))
-        return text + " " * max(0, width - visible)
+        return text + " " * max(0, width - cls._visible_len(text))
 
     def _build_file_list_lines(self, width: int) -> list[str]:
-        """Build file list display lines with direct ANSI formatting.
-
-        Much faster than Rich Panel/Table/Console capture cycle.
-        """
+        """Build file list display lines with direct ANSI formatting."""
         lines = []
         sel = len(self.selected_indices)
         total = len(self.images)
@@ -352,317 +173,102 @@ class ImageSelector:
         lines.append("")
         return lines
 
-    def _preload_image(self, index: int) -> None:
-        """Pre-load image at index into cache in background.
+    # -- rendering -------------------------------------------------------- #
 
-        Args:
-            index: Index of image to pre-load
+    def render(self) -> None:
+        """Paint one frame: the file list, and the preview if it changed.
+
+        One write, one flush, text and graphics in order. The preview is only
+        rewritten when it actually changed, and the outgoing frame is always
+        erased before the incoming one is painted.
         """
-        if index < 0 or index >= len(self.images):
-            return  # Out of bounds
+        self._terminal_size = _sample_terminal_size()
+        layout = Layout.for_terminal(self._terminal_size, self._cell)
 
-        image_path = self.images[index]
-        protocol = self._protocol
-        terminal_size = self._terminal_size
-
-        if protocol in ("iterm", "kitty", "ghostty", "sixel"):
-            # Graphics protocol dimensions
-            terminal_width = terminal_size.columns
-            terminal_height = terminal_size.lines
-            image_column = 60
-            image_width = terminal_width - image_column - 2
-            image_height = terminal_height - 2
-
-            cache_key = f"graphics:{image_path}:{image_width}:{image_height}"
-            self._schedule_preview(cache_key, image_path, image_width, image_height, "graphics")
+        frame = Frame()
+        if self._first_render:
+            frame.write(CLEAR_AND_HOME)
+            self._first_render = False
         else:
-            # Block mode dimensions
-            file_list_width = 55
-            image_column = file_list_width + 5
-            image_width = max(20, min(terminal_size.columns - image_column - 2, 60))
-            image_height = max(10, min(terminal_size.lines - 5, 35))
+            frame.write(HOME)
 
-            cache_key = f"blocks:{image_path}:{image_width}:{image_height}"
-            self._schedule_preview(cache_key, image_path, image_width, image_height, "blocks")
+        self._paint_file_list(frame, layout)
+        self._paint_preview(frame, layout)
 
-    def _trigger_preload(self) -> None:
-        """Pre-load adjacent images in background."""
-        idx = self.current_index
-        for offset in (1, -1, 2, -2):
-            target = idx + offset
+        # Anything the cache owes the terminal - today, freeing the pixels of an
+        # evicted placement - rides along in this frame rather than in a write
+        # of its own.
+        frame.write(self._preview.take_pending_writes())
+        frame.flush()
+
+        self._trigger_preload(layout)
+
+    def _paint_file_list(self, frame: Frame, layout: Layout) -> None:
+        pane = layout.list_pane
+        if pane.is_empty:
+            return
+        lines = self._build_file_list_lines(pane.width)
+        # Clipped to the pane: a folder with more images than the window is tall
+        # must not paint past the bottom. A scroll window follows in phase 4.
+        visible = [self._pad_line(line, pane.width) for line in lines[: pane.height]]
+        frame.place_lines(pane.origin, visible)
+
+    def _paint_preview(self, frame: Frame, layout: Layout) -> None:
+        box = layout.preview_box
+        if box.is_empty:
+            self._erase_painted(frame)
+            return
+
+        path = self.images[self.current_index]
+        incoming, token = self._incoming_preview(path, layout)
+        if token == self._painted_token:
+            return
+
+        self._erase_painted(frame)
+        if incoming is not None:
+            frame.write(incoming.paint(box.origin))
+        self._painted = incoming
+        self._painted_at = box.origin
+        self._painted_token = token
+
+    def _incoming_preview(
+        self, path: Path, layout: Layout
+    ) -> tuple[PreviewFrame | None, tuple[object, ...]]:
+        """The frame to show for ``path``, and a token identifying it.
+
+        The token is what the change detector compares. It has to distinguish a
+        placeholder from the real image for the same path and box, because that
+        transition is exactly when a repaint is required.
+        """
+        box = layout.preview_box.size
+        if layout.preview_suppressed:
+            message = MessageFrame(TOO_SMALL_MESSAGE, box.w)
+            return message, (path, box, "too-small")
+
+        frame = self._preview.frame_for(path, box)
+        if frame is None:
+            return MessageFrame(LOADING_MESSAGE, box.w), (path, box, "loading")
+        return frame, (path, box, "ready")
+
+    def _erase_painted(self, frame: Frame) -> None:
+        if self._painted is None or self._painted_at is None:
+            return
+        frame.write(self._painted.erase(self._painted_at))
+        self._painted = None
+        self._painted_at = None
+        self._painted_token = None
+
+    def _trigger_preload(self, layout: Layout) -> None:
+        """Warm the neighbours of the cursor in the background."""
+        if layout.preview_suppressed or layout.preview_box.is_empty:
+            return
+        box = layout.preview_box.size
+        for offset in PRELOAD_OFFSETS:
+            target = self.current_index + offset
             if 0 <= target < len(self.images):
-                self._preload_image(target)
+                self._preview.request(self.images[target], box)
 
-    def toggle_selection(self) -> None:
-        """Toggle selection state of current image."""
-        if self.current_index in self.selected_indices:
-            self.selected_indices.remove(self.current_index)
-        else:
-            self.selected_indices.add(self.current_index)
-
-    def move_up(self) -> None:
-        """Move selection cursor up."""
-        if self.current_index > 0:
-            self.current_index -= 1
-
-    def move_down(self) -> None:
-        """Move selection cursor down."""
-        if self.current_index < len(self.images) - 1:
-            self.current_index += 1
-
-    def get_selected_images(self) -> list[Path]:
-        """Get list of selected image paths.
-
-        Returns:
-            List of selected image paths in order
-        """
-        selected_indices = sorted(self.selected_indices)
-        return [self.images[i] for i in selected_indices]
-
-    def create_file_list_panel(self) -> Panel:
-        """Create the file list panel with checkboxes.
-
-        Returns:
-            Panel containing the file list
-        """
-        logger.debug(
-            f"create_file_list_panel: {len(self.images)} images, current={self.current_index}"
-        )
-
-        table = Table(show_header=False, box=None, padding=(0, 1))
-        table.add_column("checkbox", width=3)
-        table.add_column("filename", overflow="ellipsis")
-
-        for i, img in enumerate(self.images):
-            # Checkbox indicator
-            if i in self.selected_indices:
-                checkbox = "[x]"
-            else:
-                checkbox = "[ ]"
-
-            # Filename with highlight for current selection
-            filename = img.name
-
-            # Style based on current index
-            if i == self.current_index:
-                checkbox_text = Text(checkbox, style="bold cyan")
-                filename_text = Text(f"► {filename}", style="bold cyan")
-            else:
-                checkbox_text = Text(checkbox)
-                filename_text = Text(f"  {filename}")
-
-            table.add_row(checkbox_text, filename_text)
-
-        # Add current image info
-        current_image = self.images[self.current_index]
-        info_text = Text()
-        info_text.append("\n" + "─" * 40 + "\n", style="dim")
-        info_text.append(f"Current: {current_image.name}\n\n", style="cyan")
-
-        # Show lock status if selections are locked
-        if self._selections_locked:
-            info_text.append("✓ Selections locked - Press 'n' for next stage\n", style="bold green")
-
-        # Add controls footer
-        controls_text = Text()
-        if self._selections_locked:
-            controls_text.append("n: Next Stage  Enter: Unlock  q/Esc: Cancel", style="dim")
-        else:
-            controls_text.append("↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock\n", style="dim")
-            controls_text.append("q/Esc: Cancel", style="dim")
-
-        title = f"Images ({len(self.selected_indices)}/{len(self.images)} selected)"
-        logger.debug(f"Panel created with title: {title}")
-        return Panel(Group(table, info_text, controls_text), title=title, border_style="blue")
-
-    def create_layout(self) -> Panel:
-        """Create the file list panel (no preview due to Rich limitations).
-
-        Returns:
-            Panel with file list
-        """
-        logger.debug("create_layout called")
-        panel = self.create_file_list_panel()
-        logger.debug(f"Layout created: {type(panel)}")
-        return panel
-
-    def render_with_blocks(self, full_render: bool = True):
-        """Render the TUI using block mode (Unicode blocks with ANSI colors).
-
-        Uses direct ANSI line building for the file list (no Rich overhead)
-        and skips preview rewrite when the image hasn't changed.
-
-        Double-buffered: all output is collected into a list and written
-        in a single sys.stdout.write() call to eliminate visual tearing.
-        """
-        parts = []
-
-        # Anti-flicker: only clear screen on first render
-        if self._first_render:
-            parts.append("\033[2J\033[H")
-            self._first_render = False
-        else:
-            parts.append("\033[H")
-
-        current_image = self.images[self.current_index]
-        self._terminal_size = os.get_terminal_size()
-        terminal_size = self._terminal_size
-        file_list_column = 1
-        file_list_width = 55
-        image_column = file_list_width + 5
-        image_width = max(20, min(terminal_size.columns - image_column - 2, 60))
-        image_height = max(10, min(terminal_size.lines - 5, 35))
-
-        # Determine if preview needs updating
-        cache_key = f"blocks:{current_image}:{image_width}:{image_height}"
-        cache_hit = cache_key in self._image_cache
-        preview_changed = (cache_key != self._last_preview_key) or (
-            cache_hit and not self._last_preview_cached
-        )
-
-        viu_lines: list[str] | None
-        if preview_changed:
-            self._last_preview_key = cache_key
-            self._last_preview_cached = cache_hit
-            if cache_hit:
-                cached = self._image_cache[cache_key]
-                assert isinstance(cached, list)  # a blocks: key always holds lines
-                viu_lines = cached
-            elif check_viu_availability():
-                self._schedule_preview(
-                    cache_key, current_image, image_width, image_height, "blocks"
-                )
-                viu_lines = self._loading_lines(image_width, image_height)
-            else:
-                viu_lines = []
-        else:
-            viu_lines = None  # Skip preview rewrite
-
-        # Build file list (fast direct ANSI, no Rich)
-        file_list_lines = self._build_file_list_lines(file_list_width)
-
-        # Write file list (always, padded to overwrite stale content)
-        for row, line in enumerate(file_list_lines):
-            parts.append(f"\033[{row + 1};{file_list_column}H")
-            parts.append(self._pad_line(line, file_list_width))
-
-        # Write preview (only when changed)
-        if viu_lines is not None:
-            for row in range(image_height):
-                parts.append(f"\033[{row + 1};{image_column}H")
-                if row < len(viu_lines):
-                    parts.append(viu_lines[row])
-                parts.append("\033[K")
-
-        sys.stdout.write("".join(parts))
-        sys.stdout.flush()
-        self._trigger_preload()
-
-    def render_with_graphics_protocol(self):
-        """Render TUI using graphics protocol for HD images.
-
-        Uses direct ANSI line building (no Rich overhead) and skips preview
-        rewrite when the image hasn't changed. No full-screen clear on
-        subsequent renders to eliminate flickering.
-
-        Double-buffered: text output is collected into a list and written
-        in a single sys.stdout.write() call to eliminate visual tearing.
-        Binary preview data (graphics protocol) is written separately via
-        sys.stdout.buffer after flushing the text buffer.
-        """
-        parts = []
-
-        self._terminal_size = os.get_terminal_size()
-        terminal_size = self._terminal_size
-        terminal_width = terminal_size.columns
-        terminal_height = terminal_size.lines
-        file_list_width = 55
-        image_column = 60
-        image_width = terminal_width - image_column - 2
-        image_height = terminal_height - 2
-
-        if self._first_render:
-            parts.append("\033[2J\033[H")
-            self._first_render = False
-        else:
-            parts.append("\033[H")
-
-        # Build file list (fast direct ANSI, no Rich)
-        file_list_lines = self._build_file_list_lines(file_list_width)
-
-        # Write file list padded to fixed width (overwrites stale content)
-        for row, line in enumerate(file_list_lines):
-            parts.append(f"\033[{row + 1};1H")
-            parts.append(self._pad_line(line, file_list_width))
-
-        # Determine if preview needs updating
-        current_image = self.images[self.current_index]
-        cache_key = f"graphics:{current_image}:{image_width}:{image_height}"
-        cache_hit = cache_key in self._image_cache
-        preview_changed = (cache_key != self._last_preview_key) or (
-            cache_hit and not self._last_preview_cached
-        )
-
-        # Binary preview data to write after flushing text buffer
-        binary_preview = None
-
-        if preview_changed:
-            self._last_preview_key = cache_key
-            self._last_preview_cached = cache_hit
-
-            parts.append(f"\033[1;{image_column}H")
-
-            if cache_hit:
-                # Binary data must be written separately after text flush
-                binary_preview = self._image_cache[cache_key]
-            else:
-                self._schedule_preview(
-                    cache_key, current_image, image_width, image_height, "graphics"
-                )
-                parts.append("[Loading preview...]")
-
-        # Flush all text output in a single write
-        sys.stdout.write("".join(parts))
-        sys.stdout.flush()
-
-        # Write binary preview data separately (can't join with strings)
-        if binary_preview is not None:
-            sys.stdout.buffer.write(binary_preview)
-            sys.stdout.flush()
-
-        self._trigger_preload()
-
-    def render_with_preview(self, full_render: bool = True):
-        """Render the TUI with appropriate method based on terminal capabilities.
-
-        This is the main dispatcher that routes rendering to the appropriate renderer
-        based on the detected graphics protocol support. It maintains backward
-        compatibility while enabling high-fidelity image previews when available.
-
-        Rendering paths:
-        - Graphics protocol path (iterm/kitty/sixel): Always performs full render
-          using render_with_graphics_protocol(). Graphics protocols render images
-          as atomic escape sequences that can't be partially updated.
-
-        - Block mode path (fallback): Uses render_with_blocks() with configurable
-          full_render parameter. Block mode uses colored Unicode characters (▄▀)
-          that are line-based text and support partial rendering for future
-          optimization (currently always full render).
-
-        Args:
-            full_render: If True, performs full screen clear and render.
-                        If False, performs partial update (block mode only).
-                        Note: Graphics protocol path always does full render
-                        regardless of this parameter.
-        """
-        protocol = self._protocol
-
-        if protocol in ("iterm", "kitty", "sixel"):
-            # Graphics protocol path - always full render
-            self.render_with_graphics_protocol()
-        else:
-            # Block mode path - supports partial rendering
-            self.render_with_blocks(full_render=full_render)
+    # -- the input loop --------------------------------------------------- #
 
     def run(self) -> list[Path] | None:
         """Run the interactive selector.
@@ -677,10 +283,6 @@ class ImageSelector:
         import termios
         import tty
 
-        # Check viu availability
-        if not check_viu_availability():
-            fail_viu_not_found()
-
         # Save terminal settings
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
@@ -692,29 +294,26 @@ class ImageSelector:
             tty.setraw(fd)
 
             # Hide cursor
-            sys.stdout.write("\033[?25l")
+            sys.stdout.write(HIDE_CURSOR)
             sys.stdout.flush()
 
-            # Pre-load first few images on startup
-            for i in range(min(5, len(self.images))):
-                self._preload_image(i)
+            # Warm the first screenful before the initial paint
+            layout = Layout.for_terminal(self._terminal_size, self._cell)
+            if not layout.preview_suppressed and not layout.preview_box.is_empty:
+                for i in range(min(STARTUP_PRELOAD, len(self.images))):
+                    self._preview.request(self.images[i], layout.preview_box.size)
 
             # Initial render
-            self.render_with_preview()
+            self.render()
 
             while True:
                 # Read key with a short timeout; wakes immediately on preview completion
-                key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._notify_r])
+                key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._preview.wait_fd])
 
                 if key is None:
-                    if self._preview_dirty:
-                        # Drain notification pipe
-                        try:
-                            os.read(self._notify_r, 1024)
-                        except OSError:
-                            pass
-                        self._preview_dirty = False
-                        self.render_with_preview()
+                    if self._preview.dirty:
+                        self._preview.drain()
+                        self.render()
                     continue
 
                 # Handle navigation keys
@@ -779,23 +378,45 @@ class ImageSelector:
                     raise KeyboardInterrupt
 
                 # Redraw with new preview
-                self.render_with_preview()
+                self.render()
 
         finally:
-            # Restore terminal settings
-            sys.stdout.write("\033[?25h")  # Show cursor
-            sys.stdout.write("\033[2J\033[H")  # Clear screen
+            # Restore terminal settings. The full clear is what removes any
+            # graphics placement still on screen; the alternate screen buffer
+            # replaces it in phase 3.
+            sys.stdout.write(SHOW_CURSOR)
+            sys.stdout.write(CLEAR_AND_HOME)
             sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            try:
-                self._preview_executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
-            try:
-                os.close(self._notify_r)
-                os.close(self._notify_w)
-            except OSError:
-                pass
+            self._preview.close()
+
+
+def _stdout_fd() -> int | None:
+    """The descriptor we are painting to, or ``None`` when there isn't one.
+
+    Both the cell measurement and the size sample have to ask the *same*
+    descriptor, or they can disagree about which terminal they are describing.
+    """
+    try:
+        fd = sys.stdout.fileno()
+    except (OSError, AttributeError, ValueError):
+        return None
+    return fd if isinstance(fd, int) else None
+
+
+def _sample_terminal_size() -> os.terminal_size:
+    """The terminal's cell dimensions, with a fallback for a detached stdout."""
+    fd = _stdout_fd()
+    try:
+        return os.get_terminal_size() if fd is None else os.get_terminal_size(fd)
+    except OSError:
+        return FALLBACK_TERMINAL_SIZE
+
+
+def _probe_cell_metrics() -> CellMetrics:
+    """Measure one cell in pixels, falling back to the 1:2 assumption."""
+    fd = _stdout_fd()
+    return CellMetrics.assumed() if fd is None else CellMetrics.probe(fd)
 
 
 def show_processing_config(
@@ -922,7 +543,7 @@ def show_processing_config(
         tty.setraw(fd)
 
         # Hide cursor
-        sys.stdout.write("\033[?25l")
+        sys.stdout.write(HIDE_CURSOR)
         sys.stdout.flush()
 
         # Initial render
@@ -982,7 +603,7 @@ def show_processing_config(
 
     finally:
         # Restore terminal settings
-        sys.stdout.write("\033[?25h")  # Show cursor
+        sys.stdout.write(SHOW_CURSOR)
         sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 

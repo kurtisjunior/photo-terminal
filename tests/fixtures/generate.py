@@ -3,7 +3,7 @@
     nix develop -c uv run --extra dev python tests/fixtures/generate.py
 
 The outputs are deterministic, so re-running this on a clean tree produces no
-diff. ``viu_block_capture.bin`` is *not* produced here - see README.md.
+diff.
 """
 
 from __future__ import annotations

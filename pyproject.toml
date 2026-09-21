@@ -57,8 +57,28 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
-# Strict mode arrives in phase 2, scoped to the packages it applies to, so
-# there is never an override pointing at a module that does not exist.
+
+# Strict where the design's typed seams live - PreviewFrame, GraphicsProtocol,
+# Layout, CellMetrics - and permissive over the modules that predate it, so new
+# code is held to the standard without a four-thousand-line annotation backlog
+# blocking the branch. Phases 3-6 widen this list as each package moves.
+#
+# `strict = true` is spelled out here rather than used as a single key: in a
+# per-module section mypy applies several of the flags it implies globally, so
+# the shorthand would have enforced strictness over the whole package.
+[[tool.mypy.overrides]]
+module = ["photo_terminal.terminal.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+implicit_reexport = false
+warn_return_any = true
+warn_unused_ignores = true
+strict_equality = true
+extra_checks = true
 
 [[tool.mypy.overrides]]
 module = ["boto3.*", "botocore.*", "yaml.*"]
