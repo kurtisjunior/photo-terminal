@@ -10,7 +10,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from photo_terminal.errors import InsufficientDiskSpaceError, ProcessingError
 from photo_terminal.optimizer import optimize_image
+from photo_terminal.progress import ProgressReporter, reporter_or_null
+
+__all__ = [
+    "InsufficientDiskSpaceError",
+    "ProcessedImage",
+    "ProcessingError",
+    "process_images",
+]
 
 
 @dataclass
@@ -36,24 +45,13 @@ class ProcessedImage:
     upload_filename: str | None = None
 
 
-class ProcessingError(Exception):
-    """Raised when image processing fails."""
-
-    pass
-
-
-class InsufficientDiskSpaceError(Exception):
-    """Raised when there is not enough disk space for processing."""
-
-    pass
-
-
 def process_images(
     images: list[Path],
     target_size_kb: int = 400,
     output_format: str = "JPEG",
     max_dimension: int = 1920,
     filename_map: dict[Path, str] | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> tuple[tempfile.TemporaryDirectory, list[ProcessedImage]]:
     """Process multiple images with optimization and save to temp directory.
 
@@ -72,6 +70,7 @@ def process_images(
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
         max_dimension: Maximum width or height in pixels (default: 1920)
         filename_map: Optional dict mapping original Path to new filename (for reordering)
+        reporter: Where per-image progress goes. Discarded when omitted.
 
     Returns:
         Tuple of (temp_directory, processed_images):
@@ -96,6 +95,8 @@ def process_images(
     format_extensions = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
     output_extension = format_extensions[output_format]
 
+    report = reporter_or_null(reporter)
+
     # Create temporary directory
     temp_dir = tempfile.TemporaryDirectory(prefix="photo_upload_")
     temp_dir_path = Path(temp_dir.name)
@@ -107,8 +108,8 @@ def process_images(
         # Process each image
         processed_images = []
         for idx, image_path in enumerate(images, start=1):
-            # Show minimal progress feedback
-            print(f"Processing image {idx}/{len(images)}...")
+            # Progress is the pipeline's to present; we only report it.
+            report.step(idx, len(images), image_path.name)
 
             # Create output path with updated extension for output format
             # Use custom filename from filename_map if provided (for reordering)
@@ -147,15 +148,13 @@ def process_images(
                 # Fail-fast: Include filename in error message
                 raise ProcessingError(f"Failed to process image '{image_path.name}': {e}") from e
 
-        # Clear progress line after processing
-        print("\033[2K\033[1G", end="", flush=True)  # Clear line and return to start
-
         return temp_dir, processed_images
 
-    except Exception:
-        # On error, don't cleanup temp directory (for retry)
-        # Re-raise the exception
-        raise
+    finally:
+        # End the progress run either way - the reporter owns erasing whatever
+        # it drew, and an error message must not land beside a live spinner.
+        # On error the temp directory is deliberately left in place for retry.
+        report.done()
 
 
 def _check_disk_space(images: list[Path], temp_dir_path: Path) -> None:

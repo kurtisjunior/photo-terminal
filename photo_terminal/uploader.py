@@ -1,29 +1,27 @@
-"""S3 upload module with minimal progress feedback.
+"""S3 upload with fail-fast error handling.
 
-Handles batch uploads of processed images to S3 with fail-fast error handling
-and simple spinner + count progress feedback. No retry logic - fails immediately
-on any upload error.
+Uploads are reported through a :class:`~photo_terminal.progress.ProgressReporter`
+rather than drawn here: the spinner this module used to animate straight to
+``sys.stdout`` now lives in :mod:`photo_terminal.app.reporter`, which is the
+only place that decides what progress looks like.
 """
-
-import sys
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from photo_terminal.errors import UploadFailed
 from photo_terminal.processor import ProcessedImage
+from photo_terminal.progress import ProgressReporter, reporter_or_null
 
-# Spinner animation frames
-SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-
-
-class UploadError(Exception):
-    """Raised when S3 upload fails."""
-
-    pass
+__all__ = ["UploadFailed", "upload_images"]
 
 
 def upload_images(
-    processed_images: list[ProcessedImage], bucket: str, prefix: str, aws_profile: str | None
+    processed_images: list[ProcessedImage],
+    bucket: str,
+    prefix: str,
+    aws_profile: str | None,
+    reporter: ProgressReporter | None = None,
 ) -> list[str]:
     """Upload processed images to S3 with minimal progress feedback.
 
@@ -37,17 +35,20 @@ def upload_images(
         prefix: S3 key prefix (folder path)
         aws_profile: AWS CLI profile name to use, or None to let boto3 resolve
             credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
+        reporter: Where per-file progress goes. Discarded when omitted.
 
     Returns:
         List of S3 keys for successfully uploaded images
 
     Raises:
         ValueError: If processed_images list is empty
-        UploadError: If any upload fails (includes AWS error details)
+        UploadFailed: If any upload fails (includes AWS error details)
     """
     # Fail-fast: Empty images list
     if not processed_images:
         raise ValueError("Processed images list cannot be empty")
+
+    report = reporter_or_null(reporter)
 
     # Normalize prefix (handle empty string, trailing slashes)
     normalized_prefix = _normalize_prefix(prefix)
@@ -63,7 +64,7 @@ def upload_images(
             if aws_profile
             else "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (see .env.example)"
         )
-        raise UploadError(error_msg) from e
+        raise UploadFailed(error_msg) from e
 
     # Upload each image with progress feedback
     uploaded_keys = []
@@ -79,8 +80,8 @@ def upload_images(
             )
             s3_key = _construct_s3_key(normalized_prefix, filename)
 
-            # Show progress with spinner
-            _show_progress(idx, total_count)
+            # Progress is the pipeline's to present; we only report it.
+            report.step(idx, total_count, filename)
 
             # Upload to S3
             try:
@@ -90,39 +91,31 @@ def upload_images(
                 uploaded_keys.append(s3_key)
 
             except ClientError as e:
-                # Clear progress line before showing error
-                _clear_progress()
-
                 # Extract error details
                 error_code = e.response.get("Error", {}).get("Code", "Unknown")
                 error_msg = e.response.get("Error", {}).get("Message", str(e))
 
                 # Fail-fast with detailed error message
-                raise UploadError(
+                raise UploadFailed(
                     f"Failed to upload '{processed_img.original_path.name}' "
                     f"to s3://{bucket}/{s3_key}\n"
                     f"AWS Error [{error_code}]: {error_msg}"
                 ) from e
 
             except (BotoCoreError, Exception) as e:
-                # Clear progress line before showing error
-                _clear_progress()
-
                 # Fail-fast on any other error
-                raise UploadError(
+                raise UploadFailed(
                     f"Failed to upload '{processed_img.original_path.name}' "
                     f"to s3://{bucket}/{s3_key}\n"
                     f"Error: {e}"
                 ) from e
 
-        # Clear progress line after completion
-        _clear_progress()
-
         return uploaded_keys
 
-    except UploadError:
-        # Re-raise UploadError as-is
-        raise
+    finally:
+        # End the progress run either way, so an error message cannot land
+        # beside a live spinner.
+        report.done()
 
 
 def _normalize_prefix(prefix: str) -> str:
@@ -169,26 +162,3 @@ def _construct_s3_key(prefix: str, filename: str) -> str:
         return f"{prefix}/{filename}"
     else:
         return filename
-
-
-def _show_progress(current: int, total: int) -> None:
-    """Show spinner with upload count on same line.
-
-    Args:
-        current: Current upload number (1-indexed)
-        total: Total number of uploads
-    """
-    # Use frame based on current count for smooth animation
-    frame_idx = (current - 1) % len(SPINNER_FRAMES)
-    spinner = SPINNER_FRAMES[frame_idx]
-
-    # Write progress to stdout with carriage return
-    sys.stdout.write(f"\r{spinner} Uploading... ({current}/{total})")
-    sys.stdout.flush()
-
-
-def _clear_progress() -> None:
-    """Clear the progress line."""
-    # ANSI escape codes: clear line and return to start
-    sys.stdout.write("\033[2K\r")
-    sys.stdout.flush()

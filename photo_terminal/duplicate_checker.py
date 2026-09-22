@@ -2,6 +2,11 @@
 
 Checks if filenames already exist in target S3 prefix before upload.
 Uses boto3 HeadObject for fail-fast duplicate detection.
+
+Every failure here is raised as a typed error. The credential and permission
+branches used to print seven lines of guidance and raise ``SystemExit(1)`` from
+inside a head-object loop; the guidance is now the exception's message and the
+exit code is the caller's decision.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,32 +15,9 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
+from photo_terminal.errors import DuplicateKeyError, S3AccessError
 
-class DuplicateFilesError(Exception):
-    """Raised when duplicate files are found in S3 target prefix."""
-
-    def __init__(self, duplicates: list[str], bucket: str, prefix: str):
-        """Initialize with list of duplicate filenames.
-
-        Args:
-            duplicates: List of filenames that already exist in S3
-            bucket: S3 bucket name
-            prefix: S3 prefix where duplicates were found
-        """
-        self.duplicates = duplicates
-        self.bucket = bucket
-        self.prefix = prefix
-
-        # Format error message
-        files_list = "\n  - ".join(duplicates)
-        s3_path = f"s3://{bucket}/{prefix}" if prefix else f"s3://{bucket}/"
-
-        message = (
-            f"Error: The following files already exist in {s3_path}:\n"
-            f"  - {files_list}\n\n"
-            f"Aborting to prevent overwrites. No files were uploaded."
-        )
-        super().__init__(message)
+__all__ = ["DuplicateKeyError", "S3AccessError", "check_for_duplicates"]
 
 
 def check_for_duplicates(
@@ -57,8 +39,8 @@ def check_for_duplicates(
         None if no duplicates found (all clear to proceed)
 
     Raises:
-        DuplicateFilesError: If any duplicate files found in S3
-        SystemExit: On AWS credential/permission errors or network failures
+        DuplicateKeyError: If any duplicate files found in S3
+        S3AccessError: On AWS credential/permission errors or network failures
     """
     if not images:
         return
@@ -69,18 +51,18 @@ def check_for_duplicates(
         s3_client = session.client("s3")
     except Exception as e:
         if aws_profile:
-            print(f"Error: Failed to initialize AWS session with profile '{aws_profile}'")
-            print(f"Details: {e}")
-            print(f"\nMake sure AWS CLI is configured with: aws configure --profile {aws_profile}")
-        else:
-            print("Error: Failed to initialize AWS session")
-            print(f"Details: {e}")
-            print(
-                "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
-                "(see .env.example), or configure an AWS CLI profile with: "
-                "aws configure --profile <profile-name>"
-            )
-        raise SystemExit(1) from None
+            raise S3AccessError(
+                f"Failed to initialize AWS session with profile '{aws_profile}'\n"
+                f"Details: {e}\n"
+                f"\nMake sure AWS CLI is configured with: aws configure --profile {aws_profile}"
+            ) from None
+        raise S3AccessError(
+            f"Failed to initialize AWS session\n"
+            f"Details: {e}\n"
+            "\nSet AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env "
+            "(see .env.example), or configure an AWS CLI profile with: "
+            "aws configure --profile <profile-name>"
+        ) from None
 
     # Normalize prefix (ensure no leading slash, add trailing slash if not empty)
     if prefix:
@@ -102,7 +84,7 @@ def check_for_duplicates(
 
     # Raise error if any duplicates found
     if duplicates:
-        raise DuplicateFilesError(duplicates, bucket, prefix)
+        raise DuplicateKeyError(duplicates, bucket, prefix)
 
 
 def _check_sequential(s3_client, images: list[Path], bucket: str, prefix: str) -> list[str]:
@@ -140,6 +122,12 @@ def _check_parallel(s3_client, images: list[Path], bucket: str, prefix: str) -> 
 
     Returns:
         List of duplicate filenames found
+
+    Raises:
+        S3AccessError: On AWS errors, surfaced from the first worker to hit one.
+            The sequential path has always propagated these; the parallel path
+            used to swallow them, which turned a permission failure on a batch
+            of more than ten files into "no duplicates found".
     """
     duplicates = []
 
@@ -156,13 +144,8 @@ def _check_parallel(s3_client, images: list[Path], bucket: str, prefix: str) -> 
         # Collect results as they complete
         for future in as_completed(future_to_filename):
             filename = future_to_filename[future]
-            try:
-                if future.result():
-                    duplicates.append(filename)
-            except Exception:
-                # _key_exists handles errors internally
-                # This should not happen, but catch just in case
-                pass
+            if future.result():
+                duplicates.append(filename)
 
     return duplicates
 
@@ -179,7 +162,7 @@ def _key_exists(s3_client, bucket: str, key: str) -> bool:
         True if key exists, False if not found
 
     Raises:
-        SystemExit: On AWS errors (permissions, network, etc.)
+        S3AccessError: On AWS errors (permissions, network, etc.)
     """
     try:
         s3_client.head_object(Bucket=bucket, Key=key)
@@ -193,17 +176,14 @@ def _key_exists(s3_client, bucket: str, key: str) -> bool:
 
         # 403 means permission denied
         if error_code == "403":
-            print(f"Error: Permission denied accessing S3 bucket '{bucket}'")
-            print(f"Details: {e}")
-            print("\nMake sure your AWS credentials have s3:GetObject permission")
-            raise SystemExit(1) from None
+            raise S3AccessError(
+                f"Permission denied accessing S3 bucket '{bucket}'\n"
+                f"Details: {e}\n"
+                "\nMake sure your AWS credentials have s3:GetObject permission"
+            ) from None
 
         # Other errors are unexpected
-        print(f"Error: Failed to check S3 key: {key}")
-        print(f"Details: {e}")
-        raise SystemExit(1) from None
+        raise S3AccessError(f"Failed to check S3 key: {key}\nDetails: {e}") from None
     except Exception as e:
         # Network or other errors
-        print("Error: Failed to connect to S3")
-        print(f"Details: {e}")
-        raise SystemExit(1) from None
+        raise S3AccessError(f"Failed to connect to S3\nDetails: {e}") from None

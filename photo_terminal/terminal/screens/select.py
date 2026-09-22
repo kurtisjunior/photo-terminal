@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from photo_terminal.errors import NoImagesFound
 from photo_terminal.terminal.capabilities import detect_graphics_protocol
 from photo_terminal.terminal.frame import CLEAR_AND_HOME, HOME, Frame
 from photo_terminal.terminal.input import (
@@ -336,34 +337,31 @@ def select_images(images: list[Path]) -> list[Path]:
         images: List of valid image paths from scanner
 
     Returns:
-        List of selected image paths
+        The selected image paths, or an empty list if the user chose nothing.
+        Cancelling is an answer, not a failure: the caller decides what it
+        means and which exit code it earns.
 
     Raises:
-        SystemExit: If user cancels
+        NoImagesFound: If there was nothing to select from.
+        KeyboardInterrupt: If the user presses Ctrl-C. All three full-screen
+            screens propagate it, and the caller handles it in one place.
     """
     logger.info(f"select_images called with {len(images)} images")
 
     if not images:
         logger.error("No images provided")
-        print("Error: No images provided for selection")
-        raise SystemExit(1)
+        raise NoImagesFound("No images provided for selection")
 
     logger.info("Creating ImageSelector")
     selector = ImageSelector(images)
     logger.info("ImageSelector created, calling run()")
 
-    try:
-        selected = selector.run()
-        logger.info(f"Selector returned {len(selected) if selected else 0} images")
+    selected = selector.run()
+    logger.info(f"Selector returned {len(selected) if selected else 0} images")
 
-        if selected is None or not selected:
-            logger.info("User cancelled or no images selected")
-            print("\nNo images selected")
-            raise SystemExit(1)
+    if not selected:
+        logger.info("User cancelled or no images selected")
+        print("\nNo images selected")
+        return []
 
-        return selected
-
-    except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt caught")
-        print("\nCancelled by user")
-        raise SystemExit(1) from None
+    return selected

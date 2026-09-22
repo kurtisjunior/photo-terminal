@@ -1,15 +1,72 @@
-"""Dry-run mode for photo upload showing size changes without uploading.
+"""Dry-run mode: what an upload would do, without doing it.
 
-Displays what would happen without actually uploading to S3. Shows original
-and processed sizes for each selected image, processes images to get accurate
-size info, but doesn't perform S3 operations. Cleans up temp files after
-displaying information.
+This module used to print its own report and then raise ``SystemExit(0)`` at
+the end of what is otherwise a reporting function - a library call that ended
+the process. It now processes the images, measures them, and returns a
+:class:`DryRunReport`. Turning that report into text is two pure functions, and
+printing it is the pipeline's job.
+
+(Phase 6 moves this module to ``photo_terminal/reporting/dry_run.py``.)
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from photo_terminal.processor import ProcessedImage, process_images
+from photo_terminal.errors import PhotoTerminalError
+from photo_terminal.processor import process_images
+from photo_terminal.progress import ProgressReporter
 from photo_terminal.uploader import _construct_s3_key, _normalize_prefix
+
+__all__ = [
+    "DryRunFile",
+    "DryRunReport",
+    "dry_run_upload",
+    "render_header",
+    "render_report",
+]
+
+
+@dataclass(frozen=True)
+class DryRunFile:
+    """One image's measured before/after, and where it would land."""
+
+    name: str
+    original_size: int
+    final_size: int
+    warnings: tuple[str, ...]
+    s3_key: str
+
+    @property
+    def reduction_percent(self) -> float:
+        """How much smaller the processed file is, as a percentage."""
+        if self.original_size == 0:
+            return 0.0
+        return (1 - (self.final_size / self.original_size)) * 100
+
+
+@dataclass(frozen=True)
+class DryRunReport:
+    """Everything a dry run found out, with nothing rendered yet."""
+
+    bucket: str
+    prefix: str
+    target_size_kb: int
+    output_format: str
+    files: tuple[DryRunFile, ...]
+
+    @property
+    def total_original(self) -> int:
+        return sum(f.original_size for f in self.files)
+
+    @property
+    def total_processed(self) -> int:
+        return sum(f.final_size for f in self.files)
+
+    @property
+    def total_reduction_percent(self) -> float:
+        if self.total_original == 0:
+            return 0.0
+        return (1 - (self.total_processed / self.total_original)) * 100
 
 
 def dry_run_upload(
@@ -19,12 +76,12 @@ def dry_run_upload(
     target_size_kb: int,
     aws_profile: str | None,
     output_format: str = "JPEG",
-) -> None:
-    """Show what would be uploaded without actually uploading.
+    reporter: ProgressReporter | None = None,
+) -> DryRunReport:
+    """Measure what would be uploaded, without uploading anything.
 
-    Processes images to get accurate size information, displays a comprehensive
-    dry-run report showing original → processed sizes, target S3 location,
-    and S3 keys that would be created. Cleans up temp files after displaying.
+    Processes the images into a temporary directory to get accurate sizes,
+    cleans that directory up, and returns the measurements.
 
     Args:
         images: List of image paths to process
@@ -33,145 +90,103 @@ def dry_run_upload(
         target_size_kb: Target file size in kilobytes
         aws_profile: AWS CLI profile name (not used in dry-run)
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
+        reporter: Where per-image processing progress goes.
+
+    Returns:
+        The report. Nothing is printed and nothing is uploaded.
 
     Raises:
-        SystemExit: Always exits after displaying dry-run report
+        PhotoTerminalError: If the images could not be processed.
     """
-    # Display dry-run header
-    _print_header(bucket, prefix, target_size_kb, output_format)
-
-    # Process images to get accurate size information
-    print("Processing images to calculate sizes...")
-    print()
-
     try:
-        temp_dir, processed_images = process_images(images, target_size_kb, output_format)
+        temp_dir, processed_images = process_images(
+            images, target_size_kb, output_format, reporter=reporter
+        )
+    except PhotoTerminalError:
+        raise
     except Exception as e:
-        print(f"Error during image processing: {e}")
-        raise SystemExit(1) from None
+        raise PhotoTerminalError(f"Image processing failed: {e}") from None
+
+    normalized_prefix = _normalize_prefix(prefix)
 
     try:
-        # Display file-by-file report
-        _print_files_report(processed_images)
-
-        # Display summary statistics
-        _print_summary(processed_images)
-
-        # Display S3 keys that would be created
-        _print_s3_keys(processed_images, prefix)
-
-        print()
-        print("DRY RUN COMPLETE - No files were uploaded")
-        print()
-
+        files = tuple(
+            DryRunFile(
+                name=proc_img.original_path.name,
+                original_size=proc_img.original_size,
+                final_size=proc_img.final_size,
+                warnings=tuple(proc_img.warnings),
+                s3_key=_construct_s3_key(normalized_prefix, proc_img.original_path.name),
+            )
+            for proc_img in processed_images
+        )
     finally:
         # Always cleanup temp files
         temp_dir.cleanup()
 
-    # Exit after dry-run
-    raise SystemExit(0)
+    return DryRunReport(
+        bucket=bucket,
+        prefix=prefix,
+        target_size_kb=target_size_kb,
+        output_format=output_format,
+        files=files,
+    )
 
 
-def _print_header(
+def render_header(
     bucket: str, prefix: str, target_size_kb: int, output_format: str = "JPEG"
-) -> None:
-    """Print dry-run mode header.
+) -> str:
+    """The banner shown before processing starts.
 
-    Args:
-        bucket: S3 bucket name
-        prefix: S3 prefix/folder path
-        target_size_kb: Target file size in kilobytes
-        output_format: Output format
+    Kept separate from :func:`render_report` so the pipeline can show it while
+    the images are still being measured, which is when it is useful.
     """
-    print()
-    print("DRY RUN MODE - No files will be uploaded")
-    print("═" * 50)
-    print()
+    # The prefix arrives with a trailing slash from the S3 browser and without
+    # one from --prefix, and this line used to print "japan/tokyo//" for the
+    # first of those.
+    normalized = prefix.strip("/")
+    s3_target = f"s3://{bucket}/{normalized}/" if normalized else f"s3://{bucket}/"
 
-    # Build S3 target string
-    if prefix:
-        s3_target = f"s3://{bucket}/{prefix}/"
-    else:
-        s3_target = f"s3://{bucket}/"
-
-    print(f"Target location: {s3_target}")
-    print(f"Target size:     {target_size_kb} KB")
-    print(f"Output format:   {output_format}")
-    print()
-
-
-def _print_files_report(processed_images: list[ProcessedImage]) -> None:
-    """Print file-by-file processing report.
-
-    Args:
-        processed_images: List of ProcessedImage objects from processor
-    """
-    print("Files to process:")
-    print()
-
-    for proc_img in processed_images:
-        # Format file sizes
-        orig_mb = proc_img.original_size / (1024 * 1024)
-        final_kb = proc_img.final_size / 1024
-
-        # Calculate reduction percentage
-        reduction = (1 - (proc_img.final_size / proc_img.original_size)) * 100
-
-        # Print file information
-        print(f"File: {proc_img.original_path.name}")
-        print(f"  Original:  {orig_mb:.1f} MB")
-        print(f"  Processed: {final_kb:.0f} KB")
-        print(f"  Reduction: {reduction:.1f}%")
-
-        # Display warnings if any
-        if proc_img.warnings:
-            for warning in proc_img.warnings:
-                print(f"  Warning: {warning}")
-
-        print()
+    return "\n".join(
+        [
+            "",
+            "DRY RUN MODE - No files will be uploaded",
+            "═" * 50,
+            "",
+            f"Target location: {s3_target}",
+            f"Target size:     {target_size_kb} KB",
+            f"Output format:   {output_format}",
+            "",
+        ]
+    )
 
 
-def _print_summary(processed_images: list[ProcessedImage]) -> None:
-    """Print summary statistics.
+def render_report(report: DryRunReport) -> str:
+    """The full dry-run report: per file, in summary, and as S3 keys."""
+    lines: list[str] = ["Files to process:", ""]
 
-    Args:
-        processed_images: List of ProcessedImage objects from processor
-    """
-    # Calculate totals
-    total_files = len(processed_images)
-    total_original = sum(img.original_size for img in processed_images)
-    total_processed = sum(img.final_size for img in processed_images)
-    total_reduction = (1 - (total_processed / total_original)) * 100 if total_original > 0 else 0
+    for file in report.files:
+        lines.append(f"File: {file.name}")
+        lines.append(f"  Original:  {file.original_size / (1024 * 1024):.1f} MB")
+        lines.append(f"  Processed: {file.final_size / 1024:.0f} KB")
+        lines.append(f"  Reduction: {file.reduction_percent:.1f}%")
+        lines.extend(f"  Warning: {warning}" for warning in file.warnings)
+        lines.append("")
 
-    # Format sizes
-    orig_mb = total_original / (1024 * 1024)
-    proc_mb = total_processed / (1024 * 1024)
+    lines.append("SUMMARY")
+    lines.append("─" * 50)
+    lines.append(f"Total files:      {len(report.files)}")
+    lines.append(f"Original size:    {report.total_original / (1024 * 1024):.1f} MB")
+    lines.append(f"Processed size:   {report.total_processed / (1024 * 1024):.1f} MB")
+    lines.append(f"Total reduction:  {report.total_reduction_percent:.1f}%")
+    lines.append("")
 
-    # Print summary
-    print("SUMMARY")
-    print("─" * 50)
-    print(f"Total files:      {total_files}")
-    print(f"Original size:    {orig_mb:.1f} MB")
-    print(f"Processed size:   {proc_mb:.1f} MB")
-    print(f"Total reduction:  {total_reduction:.1f}%")
-    print()
+    lines.append("S3 keys that would be created:")
+    lines.extend(f"  - {file.s3_key}" for file in report.files)
+    lines.append("")
 
+    lines.append("")
+    lines.append("DRY RUN COMPLETE - No files were uploaded")
+    lines.append("")
 
-def _print_s3_keys(processed_images: list[ProcessedImage], prefix: str) -> None:
-    """Print S3 keys that would be created.
-
-    Args:
-        processed_images: List of ProcessedImage objects from processor
-        prefix: S3 prefix/folder path
-    """
-    # Normalize prefix
-    normalized_prefix = _normalize_prefix(prefix)
-
-    print("S3 keys that would be created:")
-
-    for proc_img in processed_images:
-        # Construct S3 key
-        s3_key = _construct_s3_key(normalized_prefix, proc_img.original_path.name)
-        print(f"  - {s3_key}")
-
-    print()
+    return "\n".join(lines)

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from photo_terminal.errors import NoImagesFound
+
 # Supported image formats
 SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP", "TIFF", "BMP", "GIF"}
 
@@ -54,7 +56,7 @@ def scan_folder(folder_path: str) -> list[Path]:
         List of Path objects for valid image files, sorted by name
 
     Raises:
-        SystemExit: If folder is empty or contains no valid images
+        NoImagesFound: If folder is empty or contains no valid images
     """
     path = Path(folder_path).resolve()
 
@@ -67,17 +69,13 @@ def scan_folder(folder_path: str) -> list[Path]:
     # Fail-fast if no valid images found
     if not valid_images:
         if not all_files:
-            print(f"Error: Folder is empty: {folder_path}")
-        else:
-            print(f"Error: No valid images found in folder: {folder_path}")
-            print(f"Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}")
-        raise SystemExit(1)
+            raise NoImagesFound(f"Folder is empty: {folder_path}")
+        raise NoImagesFound(
+            f"No valid images found in folder: {folder_path}\n"
+            f"Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}"
+        )
 
     # Sort by filename for consistent ordering
     valid_images.sort()
-
-    # Print summary
-    print(f"Found {len(valid_images)} valid image(s)")
-    print()
 
     return valid_images

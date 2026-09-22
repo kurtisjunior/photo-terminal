@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from photo_terminal.errors import NoImagesFound
 from photo_terminal.terminal.capabilities import GraphicsProtocol, detect_graphics_protocol
 from photo_terminal.terminal.layout import Layout
 from photo_terminal.terminal.screens.select import ImageSelector, select_images
@@ -173,24 +174,22 @@ class TestSelectImages:
     """Tests for select_images function."""
 
     def test_select_images_no_images(self):
-        """Test select_images with no images."""
-        with pytest.raises(SystemExit) as exc_info:
+        """Nothing to select from is a typed failure, not a process exit."""
+        with pytest.raises(NoImagesFound) as exc_info:
             select_images([])
 
-        assert exc_info.value.code == 1
+        assert "No images provided for selection" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
     @patch("photo_terminal.terminal.screens.select.ImageSelector")
-    def test_select_images_user_cancels(self, mock_selector_class, sample_images):
-        """Test select_images when user cancels."""
-        # Mock selector to return None (cancelled)
+    @pytest.mark.parametrize("answer", [None, []])
+    def test_select_images_user_cancels(self, mock_selector_class, sample_images, answer):
+        """Cancelling answers with an empty selection; the caller decides."""
         mock_selector = MagicMock()
-        mock_selector.run.return_value = None
+        mock_selector.run.return_value = answer
         mock_selector_class.return_value = mock_selector
 
-        with pytest.raises(SystemExit) as exc_info:
-            select_images(sample_images)
-
-        assert exc_info.value.code == 1
+        assert select_images(sample_images) == []
 
     @patch("photo_terminal.terminal.screens.select.ImageSelector")
     def test_select_images_success(self, mock_selector_class, sample_images):
@@ -207,16 +206,13 @@ class TestSelectImages:
 
     @patch("photo_terminal.terminal.screens.select.ImageSelector")
     def test_select_images_keyboard_interrupt(self, mock_selector_class, sample_images):
-        """Test select_images when user presses Ctrl+C."""
-        # Mock selector to raise KeyboardInterrupt
+        """Ctrl-C propagates, as it does from the other two screens."""
         mock_selector = MagicMock()
         mock_selector.run.side_effect = KeyboardInterrupt()
         mock_selector_class.return_value = mock_selector
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(KeyboardInterrupt):
             select_images(sample_images)
-
-        assert exc_info.value.code == 1
 
 
 class TestNavigationLogic:

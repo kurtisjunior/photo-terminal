@@ -67,7 +67,14 @@ warn_unused_configs = true
 # per-module section mypy applies several of the flags it implies globally, so
 # the shorthand would have enforced strictness over the whole package.
 [[tool.mypy.overrides]]
-module = ["photo_terminal.terminal.*"]
+module = [
+    "photo_terminal.terminal.*",
+    # Phase 5's new seams: the progress port, the typed errors, and the
+    # concrete reporter the CLI hands to library code.
+    "photo_terminal.app.*",
+    "photo_terminal.errors",
+    "photo_terminal.progress",
+]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_calls = true

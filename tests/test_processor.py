@@ -162,8 +162,10 @@ def test_process_images_optimizer_failure(sample_images):
         assert "Cannot open image" in str(exc_info.value)
 
 
-def test_process_images_progress_feedback(sample_images, mock_optimize_result, capsys):
-    """Test that progress feedback is displayed."""
+def test_process_images_reports_progress_for_each_image(
+    sample_images, mock_optimize_result, reporter
+):
+    """Progress is reported, not printed - one step per image, in order."""
 
     def mock_optimize_side_effect(
         input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
@@ -174,14 +176,13 @@ def test_process_images_progress_feedback(sample_images, mock_optimize_result, c
     with patch("photo_terminal.processor.optimize_image") as mock_optimize:
         mock_optimize.side_effect = mock_optimize_side_effect
 
-        temp_dir, processed = process_images(sample_images)
+        temp_dir, processed = process_images(sample_images, reporter=reporter)
 
-        captured = capsys.readouterr()
-
-        # Should show progress for each image
-        assert "Processing image 1/3..." in captured.out
-        assert "Processing image 2/3..." in captured.out
-        assert "Processing image 3/3..." in captured.out
+        assert reporter.steps == [
+            (1, 3, "test_image_0.jpg"),
+            (2, 3, "test_image_1.jpg"),
+            (3, 3, "test_image_2.jpg"),
+        ]
 
         temp_dir.cleanup()
 
@@ -401,8 +402,38 @@ def test_processed_image_dataclass():
     assert proc_img.warnings == ["warning1"]
 
 
-def test_process_images_clears_progress_line(sample_images, mock_optimize_result, capsys):
-    """Test that progress line is cleared after processing."""
+def test_process_images_ends_the_progress_run(sample_images, mock_optimize_result, reporter):
+    """The run is closed off, so the reporter can erase whatever it drew."""
+
+    def mock_optimize_side_effect(
+        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+    ):
+        output_path.touch()
+        return mock_optimize_result
+
+    with patch("photo_terminal.processor.optimize_image") as mock_optimize:
+        mock_optimize.side_effect = mock_optimize_side_effect
+
+        temp_dir, processed = process_images(sample_images, reporter=reporter)
+
+        assert reporter.dones == [""]
+
+        temp_dir.cleanup()
+
+
+def test_process_images_ends_the_progress_run_on_failure(sample_images, reporter):
+    """A failure must not leave a spinner on the line the error prints to."""
+    with patch("photo_terminal.processor.optimize_image") as mock_optimize:
+        mock_optimize.side_effect = ValueError("Cannot open image")
+
+        with pytest.raises(ProcessingError):
+            process_images(sample_images, reporter=reporter)
+
+    assert reporter.dones == [""]
+
+
+def test_process_images_prints_nothing(sample_images, mock_optimize_result, capsys):
+    """Presentation is the pipeline's; the processor only reports."""
 
     def mock_optimize_side_effect(
         input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
@@ -415,11 +446,7 @@ def test_process_images_clears_progress_line(sample_images, mock_optimize_result
 
         temp_dir, processed = process_images(sample_images)
 
-        captured = capsys.readouterr()
-
-        # Should have ANSI escape codes for clearing line
-        assert "\033[2K" in captured.out  # Clear line
-        assert "\033[1G" in captured.out  # Return to start
+        assert capsys.readouterr().out == ""
 
         temp_dir.cleanup()
 

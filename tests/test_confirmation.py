@@ -1,10 +1,16 @@
-"""Tests for confirmation module."""
+"""Tests for the confirmation text.
 
-from unittest.mock import patch
+The summary is a string now, so these read it directly. What the user types,
+and what the screen does about it, is :mod:`tests.test_confirm_screen`.
+"""
 
 import pytest
 
-from photo_terminal.confirmation import confirm_upload
+from photo_terminal.confirmation import (
+    build_confirmation_prompt,
+    build_confirmation_summary,
+    format_s3_target,
+)
 
 
 @pytest.fixture
@@ -29,231 +35,77 @@ def many_images(tmp_path):
     return images
 
 
-def test_confirm_upload_with_yes(sample_images, capsys):
-    """Test confirmation with 'y' response."""
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
-
-    # Check output
-    captured = capsys.readouterr()
-    assert "Upload Confirmation" in captured.out
-    assert "Images to upload: 3" in captured.out
-    assert "Target location:  s3://test-bucket/japan/tokyo/" in captured.out
-    assert "test0.jpg" in captured.out
-    assert "test1.jpg" in captured.out
-    assert "test2.jpg" in captured.out
+def test_target_is_the_s3_url_for_bucket_and_prefix():
+    assert format_s3_target("test-bucket", "japan/tokyo/") == "s3://test-bucket/japan/tokyo/"
 
 
-def test_confirm_upload_with_yes_full_word(sample_images):
-    """Test confirmation with 'yes' response."""
-    with patch("builtins.input", return_value="yes"):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
+def test_an_empty_prefix_targets_the_bucket_root():
+    assert format_s3_target("test-bucket", "") == "s3://test-bucket/"
 
 
-def test_confirm_upload_with_yes_uppercase(sample_images):
-    """Test confirmation with 'Y' response (case-insensitive)."""
-    with patch("builtins.input", return_value="Y"):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
+def test_summary_names_the_count_the_target_and_every_file(sample_images):
+    summary = build_confirmation_summary(sample_images, "test-bucket", "japan/tokyo/")
 
-    assert result is True
-
-
-def test_confirm_upload_with_yes_mixed_case(sample_images):
-    """Test confirmation with 'Yes' response (case-insensitive)."""
-    with patch("builtins.input", return_value="Yes"):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
+    assert "Upload Confirmation" in summary
+    assert "Images to upload: 3" in summary
+    assert "Target location:  s3://test-bucket/japan/tokyo/" in summary
+    assert "test0.jpg" in summary
+    assert "test1.jpg" in summary
+    assert "test2.jpg" in summary
 
 
-def test_confirm_upload_with_no(sample_images, capsys):
-    """Test cancellation with 'n' response."""
-    with patch("builtins.input", return_value="n"):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
+def test_summary_shows_the_root_target_for_an_empty_prefix(sample_images):
+    summary = build_confirmation_summary(sample_images, "test-bucket", "")
 
-    assert exc_info.value.code == 1
-
-    # Check output
-    captured = capsys.readouterr()
-    assert "Upload cancelled." in captured.out
+    assert "Target location:  s3://test-bucket/" in summary
 
 
-def test_confirm_upload_with_no_full_word(sample_images):
-    """Test cancellation with 'no' response."""
-    with patch("builtins.input", return_value="no"):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
+def test_summary_truncates_past_ten_files(many_images):
+    summary = build_confirmation_summary(many_images, "test-bucket", "photos/")
 
-    assert exc_info.value.code == 1
-
-
-def test_confirm_upload_with_no_uppercase(sample_images):
-    """Test cancellation with 'N' response (case-insensitive)."""
-    with patch("builtins.input", return_value="N"):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert exc_info.value.code == 1
+    assert "Images to upload: 15" in summary
+    assert "Files (showing first 10):" in summary
+    assert "test00.jpg" in summary
+    assert "test09.jpg" in summary
+    assert "... and 5 more" in summary
+    assert "test14.jpg" not in summary
 
 
-def test_confirm_upload_with_no_mixed_case(sample_images):
-    """Test cancellation with 'No' response (case-insensitive)."""
-    with patch("builtins.input", return_value="No"):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert exc_info.value.code == 1
-
-
-def test_confirm_upload_with_invalid_then_yes(sample_images, capsys):
-    """Test invalid input followed by valid confirmation."""
-    with patch("builtins.input", side_effect=["invalid", "y"]):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
-
-    # Check that invalid input message was shown
-    captured = capsys.readouterr()
-    assert "Invalid input" in captured.out
-
-
-def test_confirm_upload_with_invalid_then_no(sample_images, capsys):
-    """Test invalid input followed by cancellation."""
-    with patch("builtins.input", side_effect=["maybe", "x", "n"]):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert exc_info.value.code == 1
-
-    # Check that invalid input messages were shown
-    captured = capsys.readouterr()
-    assert captured.out.count("Invalid input") == 2
-
-
-def test_confirm_upload_with_empty_input(sample_images, capsys):
-    """Test empty input followed by valid response."""
-    with patch("builtins.input", side_effect=["", "y"]):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
-
-    # Check that invalid input message was shown
-    captured = capsys.readouterr()
-    assert "Invalid input" in captured.out
-
-
-def test_confirm_upload_with_whitespace(sample_images):
-    """Test input with surrounding whitespace is handled correctly."""
-    with patch("builtins.input", return_value="  y  "):
-        result = confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert result is True
-
-
-def test_confirm_upload_with_root_prefix(sample_images, capsys):
-    """Test confirmation with empty prefix (root upload)."""
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload(sample_images, "test-bucket", "")
-
-    assert result is True
-
-    # Check that root location is shown correctly
-    captured = capsys.readouterr()
-    assert "Target location:  s3://test-bucket/" in captured.out
-
-
-def test_confirm_upload_with_many_files(many_images, capsys):
-    """Test confirmation with many files shows truncated list."""
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload(many_images, "test-bucket", "photos/")
-
-    assert result is True
-
-    # Check output shows truncation
-    captured = capsys.readouterr()
-    assert "Images to upload: 15" in captured.out
-    assert "Files (showing first 10):" in captured.out
-    assert "test00.jpg" in captured.out
-    assert "test09.jpg" in captured.out
-    assert "... and 5 more" in captured.out
-    # Files after first 10 should not be shown
-    assert "test14.jpg" not in captured.out
-
-
-def test_confirm_upload_with_exactly_10_files(tmp_path, capsys):
-    """Test confirmation with exactly 10 files shows all without truncation."""
+def test_summary_shows_exactly_ten_files_in_full(tmp_path):
     images = []
     for i in range(10):
         img_path = tmp_path / f"test{i}.jpg"
         img_path.touch()
         images.append(img_path)
 
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload(images, "test-bucket", "photos/")
+    summary = build_confirmation_summary(images, "test-bucket", "photos/")
 
-    assert result is True
-
-    # Check output shows all files without truncation message
-    captured = capsys.readouterr()
-    assert "Images to upload: 10" in captured.out
-    assert "Files:" in captured.out
-    assert "Files (showing first 10):" not in captured.out
-    assert "... and" not in captured.out
-    assert "test9.jpg" in captured.out
+    assert "Images to upload: 10" in summary
+    assert "Files:" in summary
+    assert "Files (showing first 10):" not in summary
+    assert "... and" not in summary
+    assert "test9.jpg" in summary
 
 
-def test_confirm_upload_with_single_file(tmp_path, capsys):
-    """Test confirmation with a single file."""
+def test_summary_handles_a_single_file(tmp_path):
     img_path = tmp_path / "single.jpg"
     img_path.touch()
 
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload([img_path], "test-bucket", "photos/")
+    summary = build_confirmation_summary([img_path], "test-bucket", "photos/")
 
-    assert result is True
-
-    # Check output
-    captured = capsys.readouterr()
-    assert "Images to upload: 1" in captured.out
-    assert "single.jpg" in captured.out
+    assert "Images to upload: 1" in summary
+    assert "single.jpg" in summary
 
 
-def test_confirm_upload_with_eof(sample_images, capsys):
-    """Test that EOF (Ctrl+D) is handled as cancellation."""
-    with patch("builtins.input", side_effect=EOFError):
-        with pytest.raises(SystemExit) as exc_info:
-            confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
-
-    assert exc_info.value.code == 1
-
-    # Check output
-    captured = capsys.readouterr()
-    assert "Upload cancelled." in captured.out
-
-
-def test_confirm_upload_preserves_image_order(tmp_path, capsys):
-    """Test that image order is preserved in display."""
+def test_summary_preserves_the_order_it_was_given(tmp_path):
     images = []
-    names = ["zebra.jpg", "apple.jpg", "banana.jpg"]
-    for name in names:
+    for name in ["zebra.jpg", "apple.jpg", "banana.jpg"]:
         img_path = tmp_path / name
         img_path.touch()
         images.append(img_path)
 
-    with patch("builtins.input", return_value="y"):
-        result = confirm_upload(images, "test-bucket", "photos/")
-
-    assert result is True
-
-    # Check that files are shown in the order provided, not sorted
-    captured = capsys.readouterr()
-    output_lines = captured.out.split("\n")
-    file_lines = [line for line in output_lines if line.strip().startswith("- ")]
+    summary = build_confirmation_summary(images, "test-bucket", "photos/")
+    file_lines = [line for line in summary.split("\n") if line.strip().startswith("- ")]
 
     assert len(file_lines) == 3
     assert "zebra.jpg" in file_lines[0]
@@ -261,14 +113,14 @@ def test_confirm_upload_preserves_image_order(tmp_path, capsys):
     assert "banana.jpg" in file_lines[2]
 
 
-def test_confirm_upload_displays_separator_lines(sample_images, capsys):
-    """Test that confirmation displays proper formatting."""
-    with patch("builtins.input", return_value="y"):
-        confirm_upload(sample_images, "test-bucket", "japan/tokyo/")
+def test_summary_is_separated_into_sections(sample_images):
+    summary = build_confirmation_summary(sample_images, "test-bucket", "japan/tokyo/")
 
-    captured = capsys.readouterr()
+    assert "=" * 50 in summary
+    assert summary.count("\n\n") >= 2
 
-    # Check for header separator
-    assert "=" * 50 in captured.out
-    # Check for proper section spacing
-    assert captured.out.count("\n\n") >= 2
+
+def test_prompt_asks_about_the_count_and_the_target(sample_images):
+    prompt = build_confirmation_prompt(sample_images, "test-bucket", "japan/tokyo/")
+
+    assert prompt == "Upload 3 image(s) to s3://test-bucket/japan/tokyo/? [y/n]: "

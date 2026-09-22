@@ -360,8 +360,57 @@ class _ByteStream:
 
 
 # --------------------------------------------------------------------------- #
+# Progress reporting
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class RecordingReporter:
+    """A :class:`~photo_terminal.progress.ProgressReporter` that remembers.
+
+    The suite used to reach for ``capsys`` to find out whether a library
+    function had told the user anything, which meant asserting on punctuation
+    and carriage returns to prove that a loop had run. A recording double is
+    both shorter and sharper: the calls are the contract.
+    """
+
+    steps: list[tuple[int, int, str]] = field(default_factory=list)
+    dones: list[str] = field(default_factory=list)
+    infos: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def step(self, current: int, total: int, label: str) -> None:
+        self.steps.append((current, total, label))
+
+    def done(self, label: str = "") -> None:
+        self.dones.append(label)
+
+    def info(self, message: str) -> None:
+        self.infos.append(message)
+
+    def warn(self, message: str) -> None:
+        self.warnings.append(message)
+
+    @property
+    def labels(self) -> list[str]:
+        """Just the labels from the ``step`` calls, in order."""
+        return [label for _, _, label in self.steps]
+
+    @property
+    def messages(self) -> list[str]:
+        """Every one-shot message, infos and warnings together, in no order."""
+        return self.infos + self.warnings
+
+
+# --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def reporter() -> RecordingReporter:
+    """A reporter that records every call instead of drawing anything."""
+    return RecordingReporter()
 
 
 @pytest.fixture

@@ -7,7 +7,8 @@ import pytest
 from botocore.exceptions import ClientError
 
 from photo_terminal.duplicate_checker import (
-    DuplicateFilesError,
+    DuplicateKeyError,
+    S3AccessError,
     _check_parallel,
     _check_sequential,
     _key_exists,
@@ -15,13 +16,17 @@ from photo_terminal.duplicate_checker import (
 )
 
 
-class TestDuplicateFilesError:
-    """Tests for DuplicateFilesError exception."""
+class TestDuplicateKeyError:
+    """Tests for the DuplicateKeyError exception."""
+
+    def test_carries_the_cli_exit_code(self):
+        """The exit code travels with the failure, not with the call site."""
+        assert DuplicateKeyError(["a.jpg"], "bucket", "prefix").exit_code == 1
 
     def test_error_message_format_with_prefix(self):
         """Test error message formatting with non-empty prefix."""
         duplicates = ["image1.jpg", "image2.jpg", "image3.jpg"]
-        error = DuplicateFilesError(duplicates, "my-bucket", "japan/tokyo")
+        error = DuplicateKeyError(duplicates, "my-bucket", "japan/tokyo")
 
         message = str(error)
         assert "s3://my-bucket/japan/tokyo" in message
@@ -34,7 +39,7 @@ class TestDuplicateFilesError:
     def test_error_message_format_empty_prefix(self):
         """Test error message formatting with empty prefix (root)."""
         duplicates = ["photo.png"]
-        error = DuplicateFilesError(duplicates, "my-bucket", "")
+        error = DuplicateKeyError(duplicates, "my-bucket", "")
 
         message = str(error)
         assert "s3://my-bucket/" in message
@@ -43,7 +48,7 @@ class TestDuplicateFilesError:
     def test_error_attributes(self):
         """Test that error stores duplicates, bucket, and prefix."""
         duplicates = ["test.jpg"]
-        error = DuplicateFilesError(duplicates, "bucket", "prefix")
+        error = DuplicateKeyError(duplicates, "bucket", "prefix")
 
         assert error.duplicates == duplicates
         assert error.bucket == "bucket"
@@ -73,47 +78,51 @@ class TestKeyExists:
 
         assert result is False
 
-    def test_permission_denied_raises_system_exit(self, capsys):
-        """Test that 403 permission error raises SystemExit."""
+    def test_permission_denied_raises_a_typed_error(self):
+        """A 403 carries its own guidance instead of printing and exiting."""
         mock_client = Mock()
         error_response = {"Error": {"Code": "403", "Message": "Forbidden"}}
         mock_client.head_object.side_effect = ClientError(error_response, "HeadObject")
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             _key_exists(mock_client, "bucket", "file.jpg")
 
-        assert exc_info.value.code == 1
+        assert "Permission denied" in exc_info.value.message
+        assert "s3:GetObject permission" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: Permission denied" in captured.out
-        assert "s3:GetObject permission" in captured.out
-
-    def test_other_client_error_raises_system_exit(self, capsys):
-        """Test that other ClientError raises SystemExit."""
+    def test_other_client_error_raises_a_typed_error(self):
+        """Any other AWS error names the key it was checking."""
         mock_client = Mock()
         error_response = {"Error": {"Code": "500", "Message": "Server Error"}}
         mock_client.head_object.side_effect = ClientError(error_response, "HeadObject")
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             _key_exists(mock_client, "bucket", "file.jpg")
 
-        assert exc_info.value.code == 1
+        assert "Failed to check S3 key" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: Failed to check S3 key" in captured.out
-
-    def test_network_error_raises_system_exit(self, capsys):
-        """Test that network errors raise SystemExit."""
+    def test_network_error_raises_a_typed_error(self):
+        """A connection failure is a typed error too."""
         mock_client = Mock()
         mock_client.head_object.side_effect = Exception("Connection timeout")
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             _key_exists(mock_client, "bucket", "file.jpg")
 
-        assert exc_info.value.code == 1
+        assert "Failed to connect to S3" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: Failed to connect to S3" in captured.out
+    def test_the_head_object_path_prints_nothing(self, capsys):
+        """Guidance is carried by the exception, not written to stdout."""
+        mock_client = Mock()
+        mock_client.head_object.side_effect = Exception("Connection timeout")
+
+        with pytest.raises(S3AccessError):
+            _key_exists(mock_client, "bucket", "file.jpg")
+
+        assert capsys.readouterr().out == ""
 
 
 class TestCheckSequential:
@@ -210,6 +219,28 @@ class TestCheckParallel:
         assert duplicates == []
         assert mock_client.head_object.call_count == 50
 
+    def test_an_access_failure_surfaces_from_a_worker(self):
+        """A permission failure in a worker must not read as "no duplicates".
+
+        The parallel path used to swallow every exception a future raised, on
+        the grounds that ``_key_exists`` "handles errors internally" - which it
+        did by exiting the process, a ``BaseException`` that slipped past the
+        ``except Exception``. Now that it raises a normal exception, swallowing
+        it would have turned a 403 on a batch of more than ten files into a
+        clean bill of health.
+        """
+        mock_client = Mock()
+        mock_client.head_object.side_effect = ClientError(
+            {"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadObject"
+        )
+
+        images = [Path(f"/tmp/img{i}.jpg") for i in range(15)]
+
+        with pytest.raises(S3AccessError) as exc_info:
+            _check_parallel(mock_client, images, "bucket", "prefix/")
+
+        assert "Permission denied" in exc_info.value.message
+
 
 class TestCheckForDuplicates:
     """Tests for check_for_duplicates main function."""
@@ -248,7 +279,7 @@ class TestCheckForDuplicates:
 
     @patch("photo_terminal.duplicate_checker.boto3.Session")
     def test_single_duplicate_raises_error(self, mock_session):
-        """Test that single duplicate raises DuplicateFilesError."""
+        """Test that single duplicate raises DuplicateKeyError."""
         mock_client = Mock()
 
         def head_side_effect(Bucket, Key):
@@ -261,7 +292,7 @@ class TestCheckForDuplicates:
 
         images = [Path("/tmp/photo1.jpg"), Path("/tmp/photo2.jpg")]
 
-        with pytest.raises(DuplicateFilesError) as exc_info:
+        with pytest.raises(DuplicateKeyError) as exc_info:
             check_for_duplicates(images, "bucket", "japan/tokyo", "my-profile")
 
         assert exc_info.value.duplicates == ["photo1.jpg"]
@@ -269,14 +300,14 @@ class TestCheckForDuplicates:
 
     @patch("photo_terminal.duplicate_checker.boto3.Session")
     def test_multiple_duplicates_raises_error(self, mock_session):
-        """Test that multiple duplicates raises DuplicateFilesError."""
+        """Test that multiple duplicates raises DuplicateKeyError."""
         mock_client = Mock()
         mock_client.head_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
         mock_session.return_value.client.return_value = mock_client
 
         images = [Path("/tmp/img1.jpg"), Path("/tmp/img2.png"), Path("/tmp/img3.gif")]
 
-        with pytest.raises(DuplicateFilesError) as exc_info:
+        with pytest.raises(DuplicateKeyError) as exc_info:
             check_for_duplicates(images, "bucket", "prefix", "my-profile")
 
         assert set(exc_info.value.duplicates) == {"img1.jpg", "img2.png", "img3.gif"}
@@ -325,39 +356,37 @@ class TestCheckForDuplicates:
         mock_session.assert_not_called()
 
     @patch("photo_terminal.duplicate_checker.boto3.Session")
-    def test_aws_session_init_failure(self, mock_session, capsys):
-        """Test AWS session initialization failure with a profile set."""
+    def test_aws_session_init_failure(self, mock_session):
+        """A bad profile names itself and the command that fixes it."""
         mock_session.side_effect = Exception("Invalid profile")
 
         images = [Path("/tmp/img.jpg")]
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             check_for_duplicates(images, "bucket", "prefix", "bad-profile")
 
-        assert exc_info.value.code == 1
-
-        captured = capsys.readouterr()
-        assert "Error: Failed to initialize AWS session" in captured.out
-        assert "bad-profile" in captured.out
-        assert "aws configure" in captured.out
+        message = exc_info.value.message
+        assert "Failed to initialize AWS session" in message
+        assert "bad-profile" in message
+        assert "aws configure" in message
+        assert exc_info.value.exit_code == 1
 
     @patch("photo_terminal.duplicate_checker.boto3.Session")
-    def test_aws_session_init_failure_no_profile(self, mock_session, capsys):
-        """Test AWS session initialization failure message guides to .env when no profile is set."""
+    def test_aws_session_init_failure_no_profile(self, mock_session):
+        """With no profile set the guidance points at .env instead."""
         mock_session.side_effect = Exception("Unable to locate credentials")
 
         images = [Path("/tmp/img.jpg")]
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             check_for_duplicates(images, "bucket", "prefix", None)
 
-        assert exc_info.value.code == 1
-
-        captured = capsys.readouterr()
-        assert "Error: Failed to initialize AWS session" in captured.out
-        assert "AWS_ACCESS_KEY_ID" in captured.out
-        assert "AWS_SECRET_ACCESS_KEY" in captured.out
-        assert ".env" in captured.out
+        message = exc_info.value.message
+        assert "Failed to initialize AWS session" in message
+        assert "AWS_ACCESS_KEY_ID" in message
+        assert "AWS_SECRET_ACCESS_KEY" in message
+        assert ".env" in message
+        assert exc_info.value.exit_code == 1
 
     @patch("photo_terminal.duplicate_checker.boto3.Session")
     def test_uses_sequential_check_for_small_batch(self, mock_session):
@@ -442,7 +471,7 @@ class TestCheckForDuplicates:
 
         images = [Path(f"/tmp/img{i}.jpg") for i in range(1, 6)]
 
-        with pytest.raises(DuplicateFilesError) as exc_info:
+        with pytest.raises(DuplicateKeyError) as exc_info:
             check_for_duplicates(images, "bucket", "prefix", "my-profile")
 
         # Should report ALL duplicates found

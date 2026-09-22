@@ -1,11 +1,15 @@
-"""Tests for completion summary module."""
+"""Tests for the completion summary.
+
+The summary is rendered to a string rather than printed, so these read the
+return value instead of capturing stdout.
+"""
 
 from pathlib import Path
 
 import pytest
 
 from photo_terminal.processor import ProcessedImage
-from photo_terminal.summary import _format_size, show_completion_summary
+from photo_terminal.summary import _format_size, render_completion_summary
 
 
 @pytest.fixture
@@ -39,19 +43,16 @@ def sample_processed_images():
     ]
 
 
-def test_show_completion_summary_with_prefix(sample_processed_images, capsys):
+def test_render_completion_summary_with_prefix(sample_processed_images):
     """Test completion summary with S3 prefix."""
     uploaded_keys = ["japan/tokyo/image1.jpg", "japan/tokyo/image2.jpg", "japan/tokyo/photo.png"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=sample_processed_images,
         uploaded_keys=uploaded_keys,
         bucket="two-touch",
         prefix="japan/tokyo",
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check header
     assert "UPLOAD COMPLETE" in output
@@ -74,19 +75,16 @@ def test_show_completion_summary_with_prefix(sample_processed_images, capsys):
     assert "photo.png → japan/tokyo/photo.png" in output
 
 
-def test_show_completion_summary_without_prefix(sample_processed_images, capsys):
+def test_render_completion_summary_without_prefix(sample_processed_images):
     """Test completion summary with empty prefix (bucket root)."""
     uploaded_keys = ["image1.jpg", "image2.jpg", "photo.png"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=sample_processed_images,
         uploaded_keys=uploaded_keys,
         bucket="two-touch",
         prefix="",
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check S3 location for root
     assert "Location: s3://two-touch/" in output
@@ -97,7 +95,7 @@ def test_show_completion_summary_without_prefix(sample_processed_images, capsys)
     assert "photo.png → photo.png" in output
 
 
-def test_show_completion_summary_mismatch_lengths(sample_processed_images):
+def test_render_completion_summary_mismatch_lengths(sample_processed_images):
     """Test error when processed_images and uploaded_keys lengths don't match."""
     uploaded_keys = [
         "japan/tokyo/image1.jpg",
@@ -106,7 +104,7 @@ def test_show_completion_summary_mismatch_lengths(sample_processed_images):
     ]
 
     with pytest.raises(ValueError) as exc_info:
-        show_completion_summary(
+        render_completion_summary(
             processed_images=sample_processed_images,
             uploaded_keys=uploaded_keys,
             bucket="two-touch",
@@ -118,7 +116,7 @@ def test_show_completion_summary_mismatch_lengths(sample_processed_images):
     assert "2 uploaded keys" in str(exc_info.value)
 
 
-def test_show_completion_summary_single_file(capsys):
+def test_render_completion_summary_single_file():
     """Test completion summary with single file."""
     processed_images = [
         ProcessedImage(
@@ -132,15 +130,12 @@ def test_show_completion_summary_single_file(capsys):
     ]
     uploaded_keys = ["photos/single.jpg"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="my-bucket",
         prefix="photos",
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check statistics for single file
     assert "Files uploaded:    1" in output
@@ -148,7 +143,7 @@ def test_show_completion_summary_single_file(capsys):
     assert "Processed size:    342 KB" in output or "Processed size:    350 KB" in output
 
 
-def test_show_completion_summary_large_savings(capsys):
+def test_render_completion_summary_large_savings():
     """Test completion summary with large file size savings."""
     processed_images = [
         ProcessedImage(
@@ -162,15 +157,12 @@ def test_show_completion_summary_large_savings(capsys):
     ]
     uploaded_keys = ["huge.jpg"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="my-bucket",
         prefix="",
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check large file size
     assert "Original size:     95.4 MB" in output or "Original size:     100" in output
@@ -219,7 +211,7 @@ def test_format_size_edge_cases():
     assert _format_size(1024 * 1024) == "1.0 MB"
 
 
-def test_show_completion_summary_nested_prefix(capsys):
+def test_render_completion_summary_nested_prefix():
     """Test completion summary with nested prefix path."""
     processed_images = [
         ProcessedImage(
@@ -233,15 +225,12 @@ def test_show_completion_summary_nested_prefix(capsys):
     ]
     uploaded_keys = ["italy/trapani/beaches/pic.jpg"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=processed_images,
         uploaded_keys=uploaded_keys,
         bucket="photos",
         prefix="italy/trapani/beaches",
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check nested prefix in location
     assert "Location: s3://photos/italy/trapani/beaches/" in output
@@ -250,7 +239,7 @@ def test_show_completion_summary_nested_prefix(capsys):
     assert "pic.jpg → italy/trapani/beaches/pic.jpg" in output
 
 
-def test_show_completion_summary_output_format(capsys):
+def test_render_completion_summary_output_format():
     """Test that output format matches spec."""
     processed_images = [
         ProcessedImage(
@@ -264,12 +253,9 @@ def test_show_completion_summary_output_format(capsys):
     ]
     uploaded_keys = ["test.jpg"]
 
-    show_completion_summary(
+    output = render_completion_summary(
         processed_images=processed_images, uploaded_keys=uploaded_keys, bucket="bucket", prefix=""
     )
-
-    captured = capsys.readouterr()
-    output = captured.out
 
     # Check structure matches spec format
     lines = output.strip().split("\n")

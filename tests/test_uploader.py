@@ -8,11 +8,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from photo_terminal.processor import ProcessedImage
 from photo_terminal.uploader import (
-    UploadError,
-    _clear_progress,
+    UploadFailed,
     _construct_s3_key,
     _normalize_prefix,
-    _show_progress,
     upload_images,
 )
 
@@ -182,7 +180,7 @@ def test_upload_images_aws_session_error(sample_processed_images):
         # Simulate session creation error
         mock_session.side_effect = Exception("Invalid profile")
 
-        with pytest.raises(UploadError) as exc_info:
+        with pytest.raises(UploadFailed) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",
@@ -202,7 +200,7 @@ def test_upload_images_aws_session_error_no_profile(sample_processed_images):
         # Simulate session creation error (e.g. no credentials found)
         mock_session.side_effect = Exception("Unable to locate credentials")
 
-        with pytest.raises(UploadError) as exc_info:
+        with pytest.raises(UploadFailed) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",
@@ -230,7 +228,7 @@ def test_upload_images_client_error(sample_processed_images, mock_s3_client):
         ]
 
         # Should fail-fast on second image
-        with pytest.raises(UploadError) as exc_info:
+        with pytest.raises(UploadFailed) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",
@@ -257,7 +255,7 @@ def test_upload_images_botocore_error(sample_processed_images, mock_s3_client):
         # Simulate network error
         mock_s3_client.upload_file.side_effect = BotoCoreError()
 
-        with pytest.raises(UploadError) as exc_info:
+        with pytest.raises(UploadFailed) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",
@@ -282,7 +280,7 @@ def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
         # Simulate generic error
         mock_s3_client.upload_file.side_effect = Exception("Unknown error")
 
-        with pytest.raises(UploadError) as exc_info:
+        with pytest.raises(UploadFailed) as exc_info:
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",
@@ -294,8 +292,67 @@ def test_upload_images_generic_error(sample_processed_images, mock_s3_client):
         assert "Unknown error" in error_msg
 
 
-def test_upload_images_progress_feedback(sample_processed_images, mock_s3_client, capsys):
-    """Test progress feedback shows spinner with count."""
+def test_upload_images_reports_one_step_per_file(sample_processed_images, mock_s3_client, reporter):
+    """Progress is reported against the filename actually being uploaded."""
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
+        mock_session.return_value.client.return_value = mock_s3_client
+
+        upload_images(
+            processed_images=sample_processed_images,
+            bucket="test-bucket",
+            prefix="japan",
+            aws_profile="test-profile",
+            reporter=reporter,
+        )
+
+    assert [(current, total) for current, total, _ in reporter.steps] == [(1, 3), (2, 3), (3, 3)]
+    assert reporter.labels == [img.original_path.name for img in sample_processed_images]
+    assert reporter.dones == [""]
+
+
+def test_upload_images_reports_the_upload_filename_when_reordered(
+    sample_processed_images, mock_s3_client, reporter
+):
+    """A reordered image is reported under the name it will be uploaded as."""
+    sample_processed_images[0].upload_filename = "001_renamed.jpg"
+
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
+        mock_session.return_value.client.return_value = mock_s3_client
+
+        upload_images(
+            processed_images=sample_processed_images,
+            bucket="test-bucket",
+            prefix="japan",
+            aws_profile="test-profile",
+            reporter=reporter,
+        )
+
+    assert reporter.labels[0] == "001_renamed.jpg"
+
+
+def test_upload_images_ends_the_progress_run_on_failure(
+    sample_processed_images, mock_s3_client, reporter
+):
+    """An upload error must not print beside a live spinner."""
+    mock_s3_client.upload_file.side_effect = Exception("Network error")
+
+    with patch("photo_terminal.uploader.boto3.Session") as mock_session:
+        mock_session.return_value.client.return_value = mock_s3_client
+
+        with pytest.raises(UploadFailed):
+            upload_images(
+                processed_images=sample_processed_images,
+                bucket="test-bucket",
+                prefix="japan",
+                aws_profile="test-profile",
+                reporter=reporter,
+            )
+
+    assert reporter.dones == [""]
+
+
+def test_upload_images_prints_nothing(sample_processed_images, mock_s3_client, capsys):
+    """The spinner moved to the reporter; the uploader writes no bytes itself."""
     with patch("photo_terminal.uploader.boto3.Session") as mock_session:
         mock_session.return_value.client.return_value = mock_s3_client
 
@@ -306,13 +363,7 @@ def test_upload_images_progress_feedback(sample_processed_images, mock_s3_client
             aws_profile="test-profile",
         )
 
-        # Capture output
-        captured = capsys.readouterr()
-
-        # Verify progress was shown (checking for the pattern)
-        # Note: Due to \r carriage returns, exact output is hard to test
-        # We can verify the output contains uploading messages
-        assert "Uploading..." in captured.out or captured.out == ""  # May be cleared
+    assert capsys.readouterr().out == ""
 
 
 # Tests for _normalize_prefix()
@@ -371,47 +422,6 @@ def test_construct_s3_key_single_folder():
 def test_construct_s3_key_deep_hierarchy():
     """Test constructing S3 key with deep folder hierarchy."""
     assert _construct_s3_key("italy/trapani/2024", "sunset.jpg") == "italy/trapani/2024/sunset.jpg"
-
-
-# Tests for _show_progress()
-
-
-def test_show_progress_output(capsys):
-    """Test progress output format."""
-    _show_progress(1, 10)
-
-    captured = capsys.readouterr()
-    assert "Uploading..." in captured.out
-    assert "(1/10)" in captured.out
-    # Should contain a spinner character
-    assert any(char in captured.out for char in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-
-
-def test_show_progress_multiple_calls(capsys):
-    """Test multiple progress updates."""
-    for i in range(1, 4):
-        _show_progress(i, 5)
-
-    captured = capsys.readouterr()
-    # Last update should be visible
-    assert "Uploading..." in captured.out
-    assert "(3/5)" in captured.out
-
-
-# Tests for _clear_progress()
-
-
-def test_clear_progress(capsys):
-    """Test clearing progress line."""
-    # Show progress first
-    _show_progress(5, 10)
-
-    # Then clear
-    _clear_progress()
-
-    captured = capsys.readouterr()
-    # Verify ANSI clear code is output
-    assert "\033[2K" in captured.out or captured.out.endswith("\r")
 
 
 # Integration-style tests
@@ -526,7 +536,7 @@ def test_upload_fails_fast_preserves_temp_directory(sample_processed_images, moc
             assert img.temp_path.exists()
 
         # Attempt upload (should fail)
-        with pytest.raises(UploadError):
+        with pytest.raises(UploadFailed):
             upload_images(
                 processed_images=sample_processed_images,
                 bucket="test-bucket",

@@ -1,16 +1,21 @@
-"""Completion summary display for successful uploads.
+"""Completion summary for successful uploads.
 
-Shows upload completion information with statistics, file list, and S3 locations.
-Minimal output aligned with fail-fast philosophy.
+Renders upload completion information with statistics, file list, and S3
+locations. It returns the text rather than printing it: presentation is the
+pipeline's decision, and a test can read the string instead of capturing stdout.
+
+(Phase 6 moves this module to ``photo_terminal/reporting/summary.py``.)
 """
 
 from photo_terminal.processor import ProcessedImage
 
+__all__ = ["render_completion_summary"]
 
-def show_completion_summary(
+
+def render_completion_summary(
     processed_images: list[ProcessedImage], uploaded_keys: list[str], bucket: str, prefix: str
-) -> None:
-    """Display upload completion summary with statistics and file list.
+) -> str:
+    """Render the upload completion summary with statistics and file list.
 
     Shows:
     - Count of uploaded files
@@ -25,6 +30,9 @@ def show_completion_summary(
         uploaded_keys: List of S3 keys for uploaded files (from uploader)
         bucket: S3 bucket name
         prefix: S3 prefix/folder path (may be empty string for root)
+
+    Returns:
+        The summary text, without a trailing newline.
 
     Raises:
         ValueError: If processed_images and uploaded_keys lengths don't match
@@ -54,30 +62,27 @@ def show_completion_summary(
     else:
         s3_location = f"s3://{bucket}/"
 
-    # Print completion header
-    print()
-    print("UPLOAD COMPLETE")
-    print("═" * 50)
-    print()
+    lines = [
+        "",
+        "UPLOAD COMPLETE",
+        "═" * 50,
+        "",
+        f"Files uploaded:    {total_files}",
+        f"Original size:     {orig_size_str}",
+        f"Processed size:    {proc_size_str}",
+        f"Total savings:     {savings_str} ({savings_percent:.1f}%)",
+        "",
+        f"Location: {s3_location}",
+        "",
+        "Uploaded files:",
+    ]
 
-    # Print statistics
-    print(f"Files uploaded:    {total_files}")
-    print(f"Original size:     {orig_size_str}")
-    print(f"Processed size:    {proc_size_str}")
-    print(f"Total savings:     {savings_str} ({savings_percent:.1f}%)")
-    print()
-
-    # Print S3 location
-    print(f"Location: {s3_location}")
-    print()
-
-    # Print uploaded files with S3 keys
-    print("Uploaded files:")
     for proc_img, s3_key in zip(processed_images, uploaded_keys, strict=False):
-        filename = proc_img.original_path.name
-        print(f"  - {filename} → {s3_key}")
+        lines.append(f"  - {proc_img.original_path.name} → {s3_key}")
 
-    print()
+    lines.append("")
+
+    return "\n".join(lines)
 
 
 def _format_size(size_bytes: int) -> str:

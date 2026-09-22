@@ -10,6 +10,14 @@ from PIL import Image
 
 from photo_terminal.__main__ import main, validate_folder_path
 from photo_terminal.config import Config
+from photo_terminal.dry_run import DryRunReport
+from photo_terminal.errors import S3AccessError
+
+# The dry-run step returns a report and the CLI renders it. These tests are
+# about the wiring, not the measurements, so an empty report is enough.
+_EMPTY_DRY_RUN_REPORT = DryRunReport(
+    bucket="two-touch", prefix="", target_size_kb=400, output_format="JPEG", files=()
+)
 
 
 @pytest.fixture
@@ -44,7 +52,7 @@ def stub_upload_pipeline():
     """Stub the S3-touching upload steps so workflow tests need no real AWS."""
     with (
         patch("photo_terminal.__main__.upload_images") as mock_upload,
-        patch("photo_terminal.__main__.show_completion_summary") as mock_summary,
+        patch("photo_terminal.__main__.render_completion_summary") as mock_summary,
     ):
         mock_upload.return_value = ["uploaded-key"]
         yield mock_upload, mock_summary
@@ -149,7 +157,7 @@ def test_main_with_invalid_folder(capsys):
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images", return_value=["test1.jpg"])
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -254,7 +262,7 @@ def test_main_with_dry_run(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images", return_value=["test1.jpg"])
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -329,7 +337,7 @@ def test_main_without_prefix(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images", return_value=["japan/tokyo/test1.jpg"])
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -396,7 +404,10 @@ def test_main_interactive_browser_selection(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.browse_s3_folders", side_effect=SystemExit(1))
+@patch(
+    "photo_terminal.__main__.browse_s3_folders",
+    side_effect=S3AccessError("Cannot access S3 bucket 'two-touch'"),
+)
 @patch("photo_terminal.terminal.screens.select.ImageSelector.run")
 def test_main_s3_access_failure(
     mock_run,
@@ -428,7 +439,7 @@ def test_main_s3_access_failure(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.browse_s3_folders", side_effect=SystemExit(1))
+@patch("photo_terminal.__main__.browse_s3_folders", side_effect=KeyboardInterrupt)
 @patch("photo_terminal.terminal.screens.select.ImageSelector.run")
 def test_main_s3_browser_cancelled(
     mock_run,
@@ -460,7 +471,7 @@ def test_main_s3_browser_cancelled(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch(
     "photo_terminal.__main__.upload_images",
     return_value=["japan/tokyo/test1.jpg", "japan/tokyo/test2.png"],
@@ -538,7 +549,7 @@ def test_main_with_confirmation_accepted(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.confirm_upload", side_effect=SystemExit(1))
+@patch("photo_terminal.__main__.confirm_upload", return_value=False)
 @patch("photo_terminal.__main__.browse_s3_folders", return_value="japan/tokyo/")
 @patch("photo_terminal.terminal.screens.select.ImageSelector.run")
 def test_main_with_confirmation_rejected(
@@ -575,7 +586,7 @@ def test_main_with_confirmation_rejected(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images", return_value=["test1.jpg"])
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -661,8 +672,7 @@ def test_main_calls_dry_run_when_flag_set(
     selected_imgs = [folder_with_images / "test1.jpg"]
     mock_run.return_value = selected_imgs
 
-    # Mock dry_run_upload to exit with 0
-    mock_dry_run.side_effect = SystemExit(0)
+    mock_dry_run.return_value = _EMPTY_DRY_RUN_REPORT
 
     test_args = ["photo_upload.py", str(folder_with_images), "--prefix", "test/folder", "--dry-run"]
 
@@ -674,7 +684,8 @@ def test_main_calls_dry_run_when_flag_set(
 
     # Verify dry_run_upload was called with correct arguments
     # Note: browse_s3_folders adds trailing slash when prefix is provided
-    mock_dry_run.assert_called_once_with(
+    mock_dry_run.assert_called_once()
+    assert mock_dry_run.call_args.args == (
         selected_imgs,
         "two-touch",  # bucket from config
         "test/folder/",  # prefix from args (with trailing slash added by browse_s3_folders)
@@ -713,8 +724,7 @@ def test_main_dry_run_with_custom_target_size(
     selected_imgs = [folder_with_images / "test1.jpg"]
     mock_run.return_value = selected_imgs
 
-    # Mock dry_run_upload to exit with 0
-    mock_dry_run.side_effect = SystemExit(0)
+    mock_dry_run.return_value = _EMPTY_DRY_RUN_REPORT
 
     test_args = ["photo_upload.py", str(folder_with_images), "--target-size", "500", "--dry-run"]
 
@@ -757,8 +767,7 @@ def test_main_dry_run_with_empty_prefix(
     selected_imgs = [folder_with_images / "test1.jpg"]
     mock_run.return_value = selected_imgs
 
-    # Mock dry_run_upload to exit with 0
-    mock_dry_run.side_effect = SystemExit(0)
+    mock_dry_run.return_value = _EMPTY_DRY_RUN_REPORT
 
     test_args = ["photo_upload.py", str(folder_with_images), "--dry-run"]
 
@@ -801,8 +810,7 @@ def test_main_dry_run_with_multiple_images(
     selected_imgs = [folder_with_images / "test1.jpg", folder_with_images / "test2.png"]
     mock_run.return_value = selected_imgs
 
-    # Mock dry_run_upload to exit with 0
-    mock_dry_run.side_effect = SystemExit(0)
+    mock_dry_run.return_value = _EMPTY_DRY_RUN_REPORT
 
     test_args = ["photo_upload.py", str(folder_with_images), "--prefix", "photos", "--dry-run"]
 
@@ -866,7 +874,7 @@ def test_main_without_dry_run_flag_does_not_call_dry_run(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images")
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -920,10 +928,12 @@ def test_full_workflow_success(
 
     # Verify workflow order
     mock_check_duplicates.assert_called_once_with(selected_imgs, "two-touch", "test/", None)
-    mock_process.assert_called_once_with(
-        selected_imgs, 400, "JPEG", max_dimension=1920, filename_map=None
-    )
-    mock_upload.assert_called_once_with(processed_images, "two-touch", "test/", None)
+    mock_process.assert_called_once()
+    assert mock_process.call_args.args == (selected_imgs, 400, "JPEG")
+    assert mock_process.call_args.kwargs["max_dimension"] == 1920
+    assert mock_process.call_args.kwargs["filename_map"] is None
+    mock_upload.assert_called_once()
+    assert mock_upload.call_args.args == (processed_images, "two-touch", "test/", None)
     mock_summary.assert_called_once_with(processed_images, uploaded_keys, "two-touch", "test/")
 
     # Check output messages
@@ -961,14 +971,14 @@ def test_workflow_fails_on_duplicates(
     capsys,
 ):
     """Test workflow fails fast when duplicates are detected."""
-    from photo_terminal.duplicate_checker import DuplicateFilesError
+    from photo_terminal.duplicate_checker import DuplicateKeyError
 
     # Mock TUI to return selected images
     selected_imgs = [folder_with_images / "test1.jpg"]
     mock_run.return_value = selected_imgs
 
     # Mock check_for_duplicates to raise DuplicateFilesError
-    mock_check_duplicates.side_effect = DuplicateFilesError(
+    mock_check_duplicates.side_effect = DuplicateKeyError(
         duplicates=["test1.jpg"], bucket="two-touch", prefix="test"
     )
 
@@ -1066,7 +1076,7 @@ def test_workflow_fails_on_upload_error(
 ):
     """Test workflow fails when S3 upload encounters an error."""
     from photo_terminal.processor import ProcessedImage
-    from photo_terminal.uploader import UploadError
+    from photo_terminal.uploader import UploadFailed
 
     # Mock TUI to return selected images
     selected_imgs = [folder_with_images / "test1.jpg"]
@@ -1087,7 +1097,7 @@ def test_workflow_fails_on_upload_error(
     mock_process.return_value = (mock_temp_dir, processed_images)
 
     # Mock upload_images to raise UploadError
-    mock_upload.side_effect = UploadError(
+    mock_upload.side_effect = UploadFailed(
         "Failed to upload 'test1.jpg' to s3://two-touch/test/test1.jpg"
     )
 
@@ -1117,7 +1127,7 @@ def test_workflow_fails_on_upload_error(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images")
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -1175,7 +1185,7 @@ def test_workflow_with_insufficient_disk_space(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images")
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")
@@ -1229,7 +1239,8 @@ def test_workflow_with_root_prefix(
 
     # Verify empty prefix was used throughout
     mock_check_duplicates.assert_called_once_with(selected_imgs, "two-touch", "", None)
-    mock_upload.assert_called_once_with(processed_images, "two-touch", "", None)
+    mock_upload.assert_called_once()
+    assert mock_upload.call_args.args == (processed_images, "two-touch", "", None)
     mock_summary.assert_called_once_with(processed_images, uploaded_keys, "two-touch", "")
 
     # Cleanup
@@ -1246,7 +1257,7 @@ def test_workflow_with_root_prefix(
         "output_format": "JPEG",
     },
 )
-@patch("photo_terminal.__main__.show_completion_summary")
+@patch("photo_terminal.__main__.render_completion_summary")
 @patch("photo_terminal.__main__.upload_images")
 @patch("photo_terminal.__main__.process_images")
 @patch("photo_terminal.__main__.check_for_duplicates")

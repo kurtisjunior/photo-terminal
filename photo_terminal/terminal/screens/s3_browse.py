@@ -245,14 +245,15 @@ class S3FolderBrowser:
 
     # -- the input loop --------------------------------------------------- #
 
-    def run(self) -> str:
+    def run(self) -> str | None:
         """Run the interactive browser.
 
         Returns:
-            Selected S3 prefix (e.g., "japan/tokyo/" or "" for root)
+            The selected S3 prefix (e.g., "japan/tokyo/", or "" for the bucket
+            root), or None if the user quit without choosing one. ``""`` is a
+            real destination, so cancelling needs a value of its own.
 
         Raises:
-            SystemExit: If the user cancels.
             KeyboardInterrupt: If the user presses Ctrl-C.
         """
         # The first listing is synchronous: there is no interface to keep
@@ -266,7 +267,7 @@ class S3FolderBrowser:
         finally:
             self._worker.close()
 
-    def _loop(self) -> str:
+    def _loop(self) -> str | None:
         with Live(self.create_panel(), console=self.console, refresh_per_second=4) as live:
             while True:
                 key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._worker.wait_fd])
@@ -283,13 +284,13 @@ class S3FolderBrowser:
                 elif key == KEY_DOWN:
                     self.move_down()
                 elif key == KEY_ESC:
-                    raise SystemExit(1)
+                    return None
                 elif key in ("\r", "\n"):  # Enter
                     result = self.handle_selection()
                     if result is not None:
                         return result
                 elif key in ("q", "Q"):
-                    raise SystemExit(1)
+                    return None
                 elif key == "\x03":  # Ctrl+C
                     raise KeyboardInterrupt
 

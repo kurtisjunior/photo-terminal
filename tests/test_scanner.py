@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from photo_terminal.errors import NoImagesFound
 from photo_terminal.scanner import is_valid_image, scan_folder
 
 
@@ -96,7 +97,7 @@ class TestIsValidImage:
 class TestScanFolder:
     """Tests for scan_folder function."""
 
-    def test_scan_with_valid_images(self, tmp_path, capsys):
+    def test_scan_with_valid_images(self, tmp_path):
         """Test scanning folder with valid images."""
         # Create test images
         for i, fmt in enumerate(["JPEG", "PNG", "GIF"]):
@@ -113,11 +114,7 @@ class TestScanFolder:
         assert result[1].name == "test1.png"
         assert result[2].name == "test2.gif"
 
-        # Check output message
-        captured = capsys.readouterr()
-        assert "Found 3 valid image(s)" in captured.out
-
-    def test_scan_mixed_valid_invalid(self, tmp_path, capsys):
+    def test_scan_mixed_valid_invalid(self, tmp_path):
         """Test scanning folder with mix of valid and invalid files."""
         # Create valid images
         img1 = tmp_path / "valid1.jpg"
@@ -136,36 +133,37 @@ class TestScanFolder:
         assert result[0].name == "valid1.jpg"
         assert result[1].name == "valid2.png"
 
-        captured = capsys.readouterr()
-        assert "Found 2 valid image(s)" in captured.out
-
-    def test_scan_empty_folder(self, tmp_path, capsys):
-        """Test that empty folder raises SystemExit."""
-        with pytest.raises(SystemExit) as exc_info:
+    def test_scan_empty_folder(self, tmp_path):
+        """An empty folder is a typed failure, not a process exit."""
+        with pytest.raises(NoImagesFound) as exc_info:
             scan_folder(str(tmp_path))
 
-        assert exc_info.value.code == 1
+        assert "Folder is empty" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: Folder is empty" in captured.out
-
-    def test_scan_no_valid_images(self, tmp_path, capsys):
-        """Test that folder with no valid images raises SystemExit."""
+    def test_scan_no_valid_images(self, tmp_path):
+        """A folder of non-images names the formats that would have worked."""
         # Create only invalid files
         (tmp_path / "file1.txt").write_text("Text file")
         (tmp_path / "file2.pdf").write_text("PDF file")
         (tmp_path / "file3.doc").write_text("Word file")
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(NoImagesFound) as exc_info:
             scan_folder(str(tmp_path))
 
-        assert exc_info.value.code == 1
+        assert "No valid images found" in exc_info.value.message
+        assert "Supported formats:" in exc_info.value.message
+        assert exc_info.value.exit_code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: No valid images found" in captured.out
-        assert "Supported formats:" in captured.out
+    def test_scan_prints_nothing(self, tmp_path, capsys):
+        """The scanner reports its count by returning it, not by printing."""
+        Image.new("RGB", (100, 100)).save(tmp_path / "one.jpg", "JPEG")
 
-    def test_scan_excludes_hidden_files(self, tmp_path, capsys):
+        scan_folder(str(tmp_path))
+
+        assert capsys.readouterr().out == ""
+
+    def test_scan_excludes_hidden_files(self, tmp_path):
         """Test that hidden files are excluded from scan."""
         # Create visible image
         visible = tmp_path / "visible.jpg"
@@ -180,10 +178,7 @@ class TestScanFolder:
         assert len(result) == 1
         assert result[0].name == "visible.jpg"
 
-        captured = capsys.readouterr()
-        assert "Found 1 valid image(s)" in captured.out
-
-    def test_scan_non_recursive(self, tmp_path, capsys):
+    def test_scan_non_recursive(self, tmp_path):
         """Test that scan only looks at top-level files."""
         # Create image in top level
         top_img = tmp_path / "top.jpg"
@@ -200,9 +195,6 @@ class TestScanFolder:
         assert len(result) == 1
         assert result[0].name == "top.jpg"
 
-        captured = capsys.readouterr()
-        assert "Found 1 valid image(s)" in captured.out
-
     def test_scan_sorted_output(self, tmp_path):
         """Test that results are sorted by filename."""
         # Create images in non-alphabetical order
@@ -217,7 +209,7 @@ class TestScanFolder:
         # Check alphabetical order
         assert [p.name for p in result] == ["apple.png", "banana.jpg", "monkey.gif", "zebra.jpg"]
 
-    def test_scan_all_supported_formats(self, tmp_path, capsys):
+    def test_scan_all_supported_formats(self, tmp_path):
         """Test that all supported formats are recognized."""
         formats = [
             ("test.jpg", "JPEG"),
@@ -239,10 +231,7 @@ class TestScanFolder:
         assert len(result) == 8
         assert all(p.name.startswith("test.") for p in result)
 
-        captured = capsys.readouterr()
-        assert "Found 8 valid image(s)" in captured.out
-
-    def test_scan_case_insensitive_extensions(self, tmp_path, capsys):
+    def test_scan_case_insensitive_extensions(self, tmp_path):
         """Test that file extensions are case-insensitive."""
         # Create images with various case extensions
         for ext in [".JPG", ".Png", ".WEBP", ".gif"]:
@@ -256,6 +245,3 @@ class TestScanFolder:
         result = scan_folder(str(tmp_path))
 
         assert len(result) == 4
-
-        captured = capsys.readouterr()
-        assert "Found 4 valid image(s)" in captured.out

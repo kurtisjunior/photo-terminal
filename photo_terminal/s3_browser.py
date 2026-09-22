@@ -16,13 +16,16 @@ from botocore.exceptions import (
     ProfileNotFound,
 )
 
+from photo_terminal.errors import S3AccessError
 from photo_terminal.terminal.screens.s3_browse import S3FolderBrowser
 
-
-class S3AccessError(Exception):
-    """Raised when S3 access validation fails."""
-
-    pass
+__all__ = [
+    "S3AccessError",
+    "S3FolderLister",
+    "browse_s3_folders",
+    "list_s3_folders",
+    "validate_s3_access",
+]
 
 
 def validate_s3_access(bucket: str, aws_profile: str | None) -> None:
@@ -159,7 +162,7 @@ class S3FolderLister:
 
 def browse_s3_folders(
     bucket: str, aws_profile: str | None, initial_prefix: str | None = None
-) -> str:
+) -> str | None:
     """Browse S3 folders and select upload target.
 
     If initial_prefix is provided, skip browser and return it directly.
@@ -172,19 +175,19 @@ def browse_s3_folders(
         initial_prefix: Optional prefix from CLI args (skip browser if provided)
 
     Returns:
-        Selected S3 prefix (e.g., "japan/tokyo/" or "" for root)
+        The selected S3 prefix (e.g., "japan/tokyo/", or "" for the bucket
+        root), or None if the user quit the browser without choosing one.
 
     Raises:
-        SystemExit: If S3 access fails or user cancels
+        S3AccessError: If the bucket cannot be reached.
+        KeyboardInterrupt: If the user cancels the browser. The caller decides
+            what cancelling means; this module does not choose an exit code.
     """
     # Test S3 access first (fail-fast)
     try:
         validate_s3_access(bucket, aws_profile)
     except S3AccessError as e:
-        print(f"Error: Cannot access S3 bucket '{bucket}'")
-        print()
-        print(str(e))
-        raise SystemExit(1) from None
+        raise S3AccessError(f"Cannot access S3 bucket '{bucket}'\n\n{e.message}") from None
 
     # If prefix provided via CLI, skip browser
     if initial_prefix is not None:
@@ -194,16 +197,4 @@ def browse_s3_folders(
         return initial_prefix
 
     # Run interactive browser
-    print()
-    print("Select S3 upload folder:")
-    print()
-
-    browser = S3FolderBrowser(S3FolderLister(bucket, aws_profile))
-
-    try:
-        selected_prefix = browser.run()
-        return selected_prefix
-
-    except KeyboardInterrupt:
-        print("\n\nCancelled by user")
-        raise SystemExit(1) from None
+    return S3FolderBrowser(S3FolderLister(bucket, aws_profile)).run()

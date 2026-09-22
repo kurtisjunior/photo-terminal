@@ -223,20 +223,18 @@ class TestRun:
         lister.gate.set()
 
     def test_q_cancels(self, lister, scripted_keys):
+        """Quitting answers None. "" is the bucket root, so it cannot mean this."""
         browser = S3FolderBrowser(lister, console=Console(file=io.StringIO(), width=80))
         scripted_keys(["q"])
 
-        with pytest.raises(SystemExit) as exit_info:
-            browser.run()
-        assert exit_info.value.code == 1
+        assert browser.run() is None
 
     def test_a_bare_escape_cancels(self, lister, scripted_keys):
         """It used to block until the user pressed another key."""
         browser = S3FolderBrowser(lister, console=Console(file=io.StringIO(), width=80))
         scripted_keys(["\x1b", "z"])
 
-        with pytest.raises(SystemExit):
-            browser.run()
+        assert browser.run() is None
 
     def test_ctrl_c_propagates(self, lister, scripted_keys):
         browser = S3FolderBrowser(lister, console=Console(file=io.StringIO(), width=80))
@@ -255,6 +253,6 @@ class TestRun:
         browser = S3FolderBrowser(lister, console=Console(file=io.StringIO(), width=80))
         scripted_keys(["q"])
 
-        with pytest.raises(SystemExit):
-            browser.run()
+        browser.run()
+
         assert browser._worker.closed is True

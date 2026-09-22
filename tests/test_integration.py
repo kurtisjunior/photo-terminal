@@ -172,9 +172,10 @@ def test_cli_overrides_config_values(
     assert "400 KB" not in captured.out  # Original config value should not appear
 
     # Verify process_images was called with overridden target size
-    mock_process.assert_called_once_with(
-        [folder_with_images / "test1.jpg"], 600, "JPEG", max_dimension=1920, filename_map=None
-    )
+    mock_process.assert_called_once()
+    assert mock_process.call_args.args == ([folder_with_images / "test1.jpg"], 600, "JPEG")
+    assert mock_process.call_args.kwargs["max_dimension"] == 1920
+    assert mock_process.call_args.kwargs["filename_map"] is None
 
     # Cleanup
     mock_temp_dir.cleanup()

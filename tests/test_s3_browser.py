@@ -256,27 +256,27 @@ def test_browse_with_empty_cli_prefix(mock_session, mock_s3_client):
 
 
 def test_browse_s3_access_error(mock_session, mock_s3_client):
-    """Test browse_s3_folders fails when S3 access test fails."""
+    """An unreachable bucket is a typed error that names the bucket."""
     mock_s3_client.list_objects_v2.side_effect = NoCredentialsError()
 
     with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(S3AccessError) as exc_info:
             browse_s3_folders("test-bucket", "test-profile")
 
-        assert exc_info.value.code == 1
+    assert "Cannot access S3 bucket 'test-bucket'" in exc_info.value.message
+    assert "AWS credentials not found" in exc_info.value.message
+    assert exc_info.value.exit_code == 1
 
 
 def test_browse_interactive_cancelled():
-    """Test browse_s3_folders raises SystemExit when user cancels."""
+    """Ctrl-C propagates; what cancelling means is the caller's decision."""
     mock_browser = Mock()
     mock_browser.run.side_effect = KeyboardInterrupt()
 
     with patch("photo_terminal.s3_browser.validate_s3_access"):
         with patch("photo_terminal.s3_browser.S3FolderBrowser", return_value=mock_browser):
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(KeyboardInterrupt):
                 browse_s3_folders("test-bucket", "test-profile")
-
-            assert exc_info.value.code == 1
 
 
 def test_browse_interactive_success():

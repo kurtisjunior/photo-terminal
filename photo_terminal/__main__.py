@@ -17,18 +17,32 @@ import os
 import sys
 from pathlib import Path
 
+from photo_terminal.app.reporter import ConsoleProgressReporter
 from photo_terminal.config import load_config
-from photo_terminal.confirmation import confirm_upload
-from photo_terminal.dry_run import dry_run_upload
-from photo_terminal.duplicate_checker import DuplicateFilesError, check_for_duplicates
-from photo_terminal.processor import InsufficientDiskSpaceError, ProcessingError, process_images
+from photo_terminal.dry_run import dry_run_upload, render_header, render_report
+from photo_terminal.duplicate_checker import check_for_duplicates
+from photo_terminal.errors import PhotoTerminalError
+from photo_terminal.processor import process_images
+from photo_terminal.progress import ProgressReporter
 from photo_terminal.s3_browser import browse_s3_folders
 from photo_terminal.scanner import scan_folder
-from photo_terminal.summary import show_completion_summary
+from photo_terminal.summary import render_completion_summary
+from photo_terminal.terminal.screens.confirm import confirm_upload
 from photo_terminal.terminal.screens.processing_config import show_processing_config
 from photo_terminal.terminal.screens.reorder import reorder_images_interactive
 from photo_terminal.terminal.screens.select import select_images
-from photo_terminal.uploader import UploadError, upload_images
+from photo_terminal.uploader import upload_images
+
+
+def report_failure(reporter: ProgressReporter, error: PhotoTerminalError) -> int:
+    """Present a typed failure and hand back the exit code it carries.
+
+    Library code no longer decides how a failure looks or what the process
+    exits with. It raises, and this is the one place that answers both
+    questions.
+    """
+    reporter.warn(f"Error: {error.message}")
+    return error.exit_code
 
 
 def validate_folder_path(folder_path: str) -> Path:
@@ -87,6 +101,8 @@ def print_effective_config(cfg, args, folder_path: Path) -> None:
 
 def main():
     """Main CLI entry point."""
+    reporter = ConsoleProgressReporter()
+
     # Enable debug logging if environment variable is set
     if os.environ.get("PHOTO_TERMINAL_DEBUG"):
         logging.basicConfig(
@@ -106,10 +122,9 @@ def main():
 
     # Load configuration from YAML file
     try:
-        cfg = load_config()
-    except SystemExit:
-        # Config loading already printed error message
-        return 1
+        cfg = load_config(reporter=reporter)
+    except PhotoTerminalError as e:
+        return report_failure(reporter, e)
 
     # Set up argument parser
     parser = argparse.ArgumentParser(
@@ -163,13 +178,24 @@ Configuration:
     # Scan folder for valid images (fail-fast)
     try:
         valid_images = scan_folder(folder_path)
-    except SystemExit:
-        return 1
+    except PhotoTerminalError as e:
+        return report_failure(reporter, e)
+
+    print(f"Found {len(valid_images)} valid image(s)")
+    print()
 
     # Interactive image selection with two-pane TUI (fail-fast)
     try:
         selected_images = select_images(valid_images)
-    except SystemExit:
+    except PhotoTerminalError as e:
+        return report_failure(reporter, e)
+    except KeyboardInterrupt:
+        print("\nCancelled by user")
+        return 1
+
+    # An empty selection is the user declining, and the screen has already
+    # said so on screen.
+    if not selected_images:
         return 1
 
     # Display selected images count
@@ -223,8 +249,6 @@ Configuration:
     except KeyboardInterrupt:
         print("\nCancelled by user")
         return 1
-    except SystemExit:
-        return 1
 
     # Display processing configuration
     print()
@@ -238,13 +262,26 @@ Configuration:
 
     # Stage 4: S3 folder browser
     # Skip browser if --prefix was provided via CLI
+    if args.prefix is None:
+        print()
+        print("Select S3 upload folder:")
+        print()
+
     try:
         selected_prefix = browse_s3_folders(
             cfg.bucket,
             cfg.aws_profile,
             args.prefix,  # None if not provided, which triggers interactive browser
         )
-    except SystemExit:
+    except PhotoTerminalError as e:
+        return report_failure(reporter, e)
+    except KeyboardInterrupt:
+        print("\n\nCancelled by user")
+        return 1
+
+    # The browser was quit without a destination being chosen. "" is the
+    # bucket root and a real answer, so this is the only way to say "none".
+    if selected_prefix is None:
         return 1
 
     # Display selected S3 prefix
@@ -256,31 +293,37 @@ Configuration:
     print()
 
     # Upload confirmation
-    try:
-        confirm_upload(selected_images, cfg.bucket, selected_prefix)
-    except SystemExit:
+    if not confirm_upload(selected_images, cfg.bucket, selected_prefix):
         return 1
 
     # Check if dry-run mode is enabled
     if args.dry_run:
-        # Run dry-run mode (shows sizes, exits without uploading)
+        # Run dry-run mode (shows sizes, stops before uploading)
+        target_size = (
+            processing_config["target_size_kb"]
+            if processing_config["resize"]
+            else cfg.target_size_kb
+        )
+        output_format = processing_config["output_format"]
+
+        reporter.info(render_header(cfg.bucket, selected_prefix, target_size, output_format))
+        reporter.info("Processing images to calculate sizes...\n")
+
         try:
-            target_size = (
-                processing_config["target_size_kb"]
-                if processing_config["resize"]
-                else cfg.target_size_kb
-            )
-            dry_run_upload(
+            report = dry_run_upload(
                 selected_images,
                 cfg.bucket,
                 selected_prefix,
                 target_size,
                 cfg.aws_profile,
-                processing_config["output_format"],
+                output_format,
+                reporter=reporter,
             )
-        except SystemExit as e:
-            # dry_run_upload always exits - return its exit code
-            return e.code if e.code is not None else 0
+        except PhotoTerminalError as e:
+            return report_failure(reporter, e)
+
+        reporter.info(render_report(report))
+        return 0
 
     # Check for duplicates in S3 (fail-fast before processing)
     print("Checking for duplicate files in S3...")
@@ -288,14 +331,10 @@ Configuration:
         check_for_duplicates(selected_images, cfg.bucket, selected_prefix, cfg.aws_profile)
         print("No duplicates found - proceeding with upload")
         print()
-    except DuplicateFilesError as e:
-        # Print the detailed error message from DuplicateFilesError
+    except PhotoTerminalError as e:
+        # Duplicates, and AWS credential/permission failures, both land here
         print()
-        print(str(e))
-        return 1
-    except SystemExit:
-        # AWS credential/permission errors already printed
-        return 1
+        return report_failure(reporter, e)
 
     # Process images (optimize with temp file management)
     print("Processing images...")
@@ -309,38 +348,37 @@ Configuration:
             processing_config["output_format"],
             max_dimension=1920,
             filename_map=image_reorder_map,
+            reporter=reporter,
         )
-    except InsufficientDiskSpaceError as e:
-        print(f"Error: {e}")
-        return 1
-    except ProcessingError as e:
-        print(f"Error: {e}")
-        return 1
+    except PhotoTerminalError as e:
+        return report_failure(reporter, e)
     except Exception as e:
-        print(f"Unexpected error during image processing: {e}")
+        reporter.warn(f"Unexpected error during image processing: {e}")
         return 1
 
     # Upload to S3 with progress feedback
     try:
         uploaded_keys = upload_images(
-            processed_images, cfg.bucket, selected_prefix, cfg.aws_profile
+            processed_images, cfg.bucket, selected_prefix, cfg.aws_profile, reporter=reporter
         )
-    except UploadError as e:
-        print(f"Error: {e}")
+    except PhotoTerminalError as e:
+        exit_code = report_failure(reporter, e)
         print()
         print("Upload failed. Temp files preserved for retry.")
-        return 1
+        return exit_code
     except Exception as e:
-        print(f"Unexpected error during upload: {e}")
+        reporter.warn(f"Unexpected error during upload: {e}")
         print()
         print("Upload failed. Temp files preserved for retry.")
         return 1
 
     # Show completion summary
     try:
-        show_completion_summary(processed_images, uploaded_keys, cfg.bucket, selected_prefix)
+        reporter.info(
+            render_completion_summary(processed_images, uploaded_keys, cfg.bucket, selected_prefix)
+        )
     except Exception as e:
-        print(f"Warning: Failed to display completion summary: {e}")
+        reporter.warn(f"Warning: Failed to display completion summary: {e}")
         # Don't fail on summary display error
         print()
         print(f"Upload completed successfully: {len(uploaded_keys)} files")
@@ -351,7 +389,7 @@ Configuration:
         temp_dir.cleanup()
     except Exception as e:
         # Don't fail on cleanup error, just warn
-        print(f"Warning: Failed to cleanup temp files: {e}")
+        reporter.warn(f"Warning: Failed to cleanup temp files: {e}")
 
     return 0
 
