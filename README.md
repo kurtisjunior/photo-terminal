@@ -577,8 +577,6 @@ photo-terminal/
 │   ├── __main__.py          # CLI entry point
 │   ├── config.py            # YAML configuration management
 │   ├── scanner.py           # Image format validation
-│   ├── tui.py               # Two-pane image selector with multi-stage workflow
-│   ├── reorder_ui.py        # Interactive reorder screen
 │   ├── terminal/            # The only package that touches stdin and stdout
 │   │   ├── capabilities.py  # GraphicsProtocol detection
 │   │   ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
@@ -586,8 +584,16 @@ photo-terminal/
 │   │   ├── frame.py         # Buffered painter: one write, one flush
 │   │   ├── session.py       # Raw mode, alternate screen, cursor: one teardown
 │   │   ├── input.py         # Key decoding, shared by every screen
-│   │   └── preview/         # Kitty emitter, half-block renderer, cache + workers
-│   ├── s3_browser.py        # Interactive S3 folder browser
+│   │   ├── background.py    # One worker pool and wakeup pipe for every screen
+│   │   ├── preview/         # Kitty emitter, half-block renderer, cache + workers
+│   │   └── screens/         # Every full-screen UI, on the shared machinery
+│   │       ├── widgets.py   # ListView: bounded navigation and a scroll window
+│   │       ├── preview_pane.py     # One preview at a time, cleanly replaced
+│   │       ├── select.py           # Stage 1: pick the images
+│   │       ├── reorder.py          # Stage 2: put them in upload order
+│   │       ├── processing_config.py # Stage 3: resize, EXIF, output format
+│   │       └── s3_browse.py        # Stage 4: pick the destination prefix
+│   ├── s3_browser.py        # S3 access, listing, and the browser's wiring
 │   ├── confirmation.py      # Upload confirmation prompt
 │   ├── optimizer.py         # Multi-format image optimization
 │   ├── processor.py         # Batch processing pipeline

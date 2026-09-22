@@ -1,13 +1,10 @@
-"""Interactive S3 folder browser with hierarchy navigation.
+"""S3 access: credentials, prefix listing, and the wiring for the browser screen.
 
-Provides a terminal interface for navigating S3 bucket structure:
-- Lists folders/prefixes at current level
-- Arrow keys to navigate
-- Enter to drill into folders
-- '..' to go up one level
-- 'Select current folder' option to choose current location
-- Shows breadcrumb navigation at top
-- Tests S3 access on startup for fail-fast error handling
+What is left here is infrastructure. The screen half moved to
+:mod:`photo_terminal.terminal.screens.s3_browse`, which takes a
+:class:`~photo_terminal.terminal.screens.s3_browse.FolderLister` port and makes
+no AWS calls of its own; this module provides the boto3 implementation of that
+port and composes the two. (Phase 6 moves the whole file under ``storage/``.)
 """
 
 import boto3
@@ -18,14 +15,8 @@ from botocore.exceptions import (
     NoCredentialsError,
     ProfileNotFound,
 )
-from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
-from photo_terminal.terminal.input import KEY_DOWN, KEY_ESC, KEY_UP, read_key
-from photo_terminal.terminal.session import TerminalSession
+from photo_terminal.terminal.screens.s3_browse import S3FolderBrowser
 
 
 class S3AccessError(Exception):
@@ -154,192 +145,16 @@ def list_s3_folders(bucket: str, aws_profile: str | None, prefix: str = "") -> l
         raise S3AccessError(f"Error listing S3 folders: {e}") from e
 
 
-class S3FolderBrowser:
-    """Interactive S3 folder browser with hierarchy navigation."""
+class S3FolderLister:
+    """The boto3 implementation of the browser's folder-listing port."""
 
     def __init__(self, bucket: str, aws_profile: str | None):
-        """Initialize S3 folder browser.
-
-        Args:
-            bucket: S3 bucket name
-            aws_profile: AWS profile name, or None to let boto3 resolve
-                credentials from the environment (e.g. AWS_ACCESS_KEY_ID)
-        """
         self.bucket = bucket
         self.aws_profile = aws_profile
-        self.current_prefix = ""  # Current S3 prefix (e.g., "japan/tokyo/")
-        self.folders: list[str] = []  # Folders at current level
-        self.current_index = 0  # Currently highlighted item
-        self.console = Console()
 
-        # Special menu items
-        self.SELECT_CURRENT = "[Select current folder]"
-        self.GO_UP = ".."
-
-    def get_breadcrumb(self) -> str:
-        """Get breadcrumb path for current location.
-
-        Returns:
-            Breadcrumb string (e.g., "Root / japan / tokyo")
-        """
-        if not self.current_prefix:
-            return "Root"
-
-        # Split prefix into parts
-        parts = self.current_prefix.rstrip("/").split("/")
-        return "Root / " + " / ".join(parts)
-
-    def get_menu_items(self) -> list[str]:
-        """Get menu items for current level.
-
-        Returns:
-            List of menu items including special options and folders
-        """
-        items = [self.SELECT_CURRENT]
-
-        # Add "go up" option if not at root
-        if self.current_prefix:
-            items.append(self.GO_UP)
-
-        # Add folders
-        items.extend(self.folders)
-
-        return items
-
-    def load_folders(self) -> None:
-        """Load folders at current prefix level."""
-        self.folders = list_s3_folders(self.bucket, self.aws_profile, self.current_prefix)
-        self.current_index = 0  # Reset selection to top
-
-    def move_up(self) -> None:
-        """Move selection cursor up."""
-        if self.current_index > 0:
-            self.current_index -= 1
-
-    def move_down(self) -> None:
-        """Move selection cursor down."""
-        menu_items = self.get_menu_items()
-        if self.current_index < len(menu_items) - 1:
-            self.current_index += 1
-
-    def handle_selection(self) -> str | None:
-        """Handle Enter key on current selection.
-
-        Returns:
-            Selected prefix if user chose current folder, None to continue browsing
-        """
-        menu_items = self.get_menu_items()
-        selected = menu_items[self.current_index]
-
-        if selected == self.SELECT_CURRENT:
-            # User selected current folder
-            return self.current_prefix
-
-        elif selected == self.GO_UP:
-            # Go up one level
-            if self.current_prefix:
-                # Remove last segment
-                parts = self.current_prefix.rstrip("/").split("/")
-                if len(parts) > 1:
-                    self.current_prefix = "/".join(parts[:-1]) + "/"
-                else:
-                    self.current_prefix = ""
-                self.load_folders()
-            return None
-
-        else:
-            # User selected a folder - drill into it
-            self.current_prefix = self.current_prefix + selected + "/"
-            self.load_folders()
-            return None
-
-    def create_panel(self) -> Panel:
-        """Create the browser panel with folder list.
-
-        Returns:
-            Panel containing the folder browser
-        """
-        table = Table(show_header=False, box=None, padding=(0, 1))
-        table.add_column("item", overflow="fold")
-
-        menu_items = self.get_menu_items()
-
-        for i, item in enumerate(menu_items):
-            # Add visual indicators
-            if item == self.SELECT_CURRENT:
-                display = f"✓ {item}"
-            elif item == self.GO_UP:
-                display = f"↑ {item}"
-            else:
-                display = f"  {item}/"
-
-            # Highlight current selection
-            if i == self.current_index:
-                text = Text(f"► {display}", style="bold cyan")
-            else:
-                text = Text(f"  {display}")
-
-            table.add_row(text)
-
-        # Add controls footer
-        controls_text = Text()
-        controls_text.append("\n" + "─" * 40 + "\n", style="dim")
-        controls_text.append("↑/↓: Navigate  Enter: Select/Drill down\n", style="dim")
-        controls_text.append("q/Esc: Cancel", style="dim")
-
-        # Show breadcrumb in title
-        breadcrumb = self.get_breadcrumb()
-        title = f"S3 Browser: {breadcrumb}"
-
-        from rich.console import Group
-
-        return Panel(Group(table, controls_text), title=title, border_style="blue")
-
-    def run(self) -> str:
-        """Run the interactive browser.
-
-        Returns:
-            Selected S3 prefix (e.g., "japan/tokyo/" or "" for root)
-
-        Raises:
-            SystemExit: If user cancels
-        """
-        # Load initial folder list
-        self.load_folders()
-
-        with TerminalSession():
-            with Live(self.create_panel(), console=self.console, refresh_per_second=4) as live:
-                while True:
-                    # One reader for every screen: a bare ESC cancels straight
-                    # away rather than waiting out the next keypress.
-                    key = read_key()
-
-                    if key is None:  # an escape sequence this screen ignores
-                        continue
-
-                    if key == KEY_UP:
-                        self.move_up()
-
-                    elif key == KEY_DOWN:
-                        self.move_down()
-
-                    elif key == KEY_ESC:
-                        raise SystemExit(1)
-
-                    elif key == "\r" or key == "\n":  # Enter
-                        result = self.handle_selection()
-                        if result is not None:
-                            # User selected a folder
-                            return result
-
-                    elif key == "q" or key == "Q":  # Quit
-                        raise SystemExit(1)
-
-                    elif key == "\x03":  # Ctrl+C
-                        raise KeyboardInterrupt
-
-                    # Update the display
-                    live.update(self.create_panel())
+    def list_folders(self, prefix: str) -> list[str]:
+        """The folder names directly under ``prefix``, sorted."""
+        return list_s3_folders(self.bucket, self.aws_profile, prefix)
 
 
 def browse_s3_folders(
@@ -383,7 +198,7 @@ def browse_s3_folders(
     print("Select S3 upload folder:")
     print()
 
-    browser = S3FolderBrowser(bucket, aws_profile)
+    browser = S3FolderBrowser(S3FolderLister(bucket, aws_profile))
 
     try:
         selected_prefix = browser.run()

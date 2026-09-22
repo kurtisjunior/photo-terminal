@@ -1,4 +1,10 @@
-"""Tests for S3 folder browser module."""
+"""Tests for S3 access: credentials, prefix listing, and the browser wiring.
+
+The screen half of this module moved to
+``photo_terminal.terminal.screens.s3_browse`` and is covered by
+``test_s3_browse_screen.py``, which drives it against a fake port instead of a
+mocked boto3 session.
+"""
 
 from unittest.mock import Mock, patch
 
@@ -12,11 +18,12 @@ from botocore.exceptions import (
 
 from photo_terminal.s3_browser import (
     S3AccessError,
-    S3FolderBrowser,
+    S3FolderLister,
     browse_s3_folders,
     list_s3_folders,
     validate_s3_access,
 )
+from photo_terminal.terminal.screens.s3_browse import S3FolderBrowser
 
 # Test fixtures
 
@@ -214,200 +221,6 @@ def test_list_s3_folders_error(mock_session, mock_s3_client):
         assert "error listing" in str(exc_info.value).lower()
 
 
-# Tests for S3FolderBrowser class
-
-
-def test_browser_init():
-    """Test S3FolderBrowser initialization."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-
-    assert browser.bucket == "test-bucket"
-    assert browser.aws_profile == "test-profile"
-    assert browser.current_prefix == ""
-    assert browser.folders == []
-    assert browser.current_index == 0
-
-
-def test_browser_breadcrumb_root():
-    """Test breadcrumb at root level."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = ""
-
-    assert browser.get_breadcrumb() == "Root"
-
-
-def test_browser_breadcrumb_single_level():
-    """Test breadcrumb at single level."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/"
-
-    assert browser.get_breadcrumb() == "Root / japan"
-
-
-def test_browser_breadcrumb_nested():
-    """Test breadcrumb at nested level."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "italy/trapani/"
-
-    assert browser.get_breadcrumb() == "Root / italy / trapani"
-
-
-def test_browser_menu_items_root():
-    """Test menu items at root level."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = ""
-    browser.folders = ["japan", "italy"]
-
-    items = browser.get_menu_items()
-
-    assert items[0] == browser.SELECT_CURRENT
-    # No "go up" at root
-    assert browser.GO_UP not in items
-    assert "japan" in items
-    assert "italy" in items
-
-
-def test_browser_menu_items_subfolder():
-    """Test menu items in a subfolder."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/"
-    browser.folders = ["tokyo", "kyoto"]
-
-    items = browser.get_menu_items()
-
-    assert items[0] == browser.SELECT_CURRENT
-    assert items[1] == browser.GO_UP  # Should have "go up"
-    assert "tokyo" in items
-    assert "kyoto" in items
-
-
-def test_browser_navigation_up():
-    """Test moving selection up."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.folders = ["japan", "italy"]
-    browser.current_index = 2
-
-    browser.move_up()
-    assert browser.current_index == 1
-
-    browser.move_up()
-    assert browser.current_index == 0
-
-    # Should not go below 0
-    browser.move_up()
-    assert browser.current_index == 0
-
-
-def test_browser_navigation_down():
-    """Test moving selection down."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.folders = ["japan", "italy"]
-    browser.current_index = 0
-
-    browser.move_down()
-    assert browser.current_index == 1
-
-    browser.move_down()
-    assert browser.current_index == 2
-
-    # Should not exceed list length
-    browser.move_down()
-    assert browser.current_index == 2
-
-
-def test_browser_select_current_folder():
-    """Test selecting current folder."""
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/tokyo/"
-    browser.folders = []
-    browser.current_index = 0  # First item is "Select current folder"
-
-    result = browser.handle_selection()
-
-    assert result == "japan/tokyo/"
-
-
-def test_browser_drill_into_folder(mock_session, mock_s3_client):
-    """Test drilling into a subfolder."""
-    mock_s3_client.list_objects_v2.return_value = {
-        "CommonPrefixes": [
-            {"Prefix": "japan/tokyo/"},
-            {"Prefix": "japan/kyoto/"},
-        ]
-    }
-
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/"
-    browser.folders = ["tokyo", "kyoto"]
-    browser.current_index = 2  # First item is "Select", second is "..", third is "tokyo"
-
-    with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
-        result = browser.handle_selection()
-
-    assert result is None  # Continue browsing
-    assert browser.current_prefix == "japan/tokyo/"
-
-
-def test_browser_go_up_one_level(mock_session, mock_s3_client):
-    """Test going up one level."""
-    mock_s3_client.list_objects_v2.return_value = {
-        "CommonPrefixes": [
-            {"Prefix": "japan/"},
-        ]
-    }
-
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/tokyo/"
-    browser.folders = []
-    browser.current_index = 1  # First item is "Select", second is ".."
-
-    with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
-        result = browser.handle_selection()
-
-    assert result is None  # Continue browsing
-    assert browser.current_prefix == "japan/"
-
-
-def test_browser_go_up_to_root(mock_session, mock_s3_client):
-    """Test going up to root level."""
-    mock_s3_client.list_objects_v2.return_value = {
-        "CommonPrefixes": [
-            {"Prefix": "japan/"},
-            {"Prefix": "italy/"},
-        ]
-    }
-
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_prefix = "japan/"
-    browser.folders = []
-    browser.current_index = 1  # First item is "Select", second is ".."
-
-    with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
-        result = browser.handle_selection()
-
-    assert result is None  # Continue browsing
-    assert browser.current_prefix == ""
-
-
-def test_browser_load_folders(mock_session, mock_s3_client):
-    """Test loading folders at current level."""
-    mock_s3_client.list_objects_v2.return_value = {
-        "CommonPrefixes": [
-            {"Prefix": "japan/"},
-            {"Prefix": "italy/"},
-        ]
-    }
-
-    browser = S3FolderBrowser("test-bucket", "test-profile")
-    browser.current_index = 5  # Some arbitrary index
-
-    with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
-        browser.load_folders()
-
-    assert browser.folders == ["italy", "japan"]
-    assert browser.current_index == 0  # Reset to top
-
-
 # Tests for browse_s3_folders function
 
 
@@ -482,7 +295,7 @@ def test_browse_interactive_success():
 
 
 def test_full_navigation_flow(mock_session, mock_s3_client):
-    """Test complete navigation flow: root -> subfolder -> select."""
+    """The screen and the boto3 lister together: root -> subfolder -> select."""
 
     # Setup mock responses for different levels
     def list_objects_side_effect(**kwargs):
@@ -495,7 +308,7 @@ def test_full_navigation_flow(mock_session, mock_s3_client):
 
     mock_s3_client.list_objects_v2.side_effect = list_objects_side_effect
 
-    browser = S3FolderBrowser("test-bucket", "test-profile")
+    browser = S3FolderBrowser(S3FolderLister("test-bucket", "test-profile"))
 
     with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
         # Start at root
@@ -503,14 +316,35 @@ def test_full_navigation_flow(mock_session, mock_s3_client):
         assert browser.folders == ["japan"]
         assert browser.current_prefix == ""
 
-        # Drill into japan
+        # Drill into japan. The listing runs off the input loop, so the test
+        # waits for it exactly where the loop's wakeup pipe would.
         browser.current_index = 1  # "japan" folder
         result = browser.handle_selection()
         assert result is None
         assert browser.current_prefix == "japan/"
+        browser.settle(timeout=5)
         assert browser.folders == ["tokyo"]
 
         # Select current folder
         browser.current_index = 0  # "Select current folder"
         result = browser.handle_selection()
         assert result == "japan/"
+
+
+# Tests for the boto3 implementation of the browser's port
+
+
+def test_folder_lister_delegates_to_list_s3_folders(mock_session, mock_s3_client):
+    """The screen depends on this one method and nothing else."""
+    mock_s3_client.list_objects_v2.return_value = {
+        "CommonPrefixes": [{"Prefix": "japan/tokyo/"}, {"Prefix": "japan/kyoto/"}]
+    }
+
+    lister = S3FolderLister("test-bucket", "test-profile")
+    with patch("photo_terminal.s3_browser.boto3.Session", return_value=mock_session):
+        folders = lister.list_folders("japan/")
+
+    assert folders == ["kyoto", "tokyo"]
+    mock_s3_client.list_objects_v2.assert_called_once_with(
+        Bucket="test-bucket", Prefix="japan/", Delimiter="/"
+    )

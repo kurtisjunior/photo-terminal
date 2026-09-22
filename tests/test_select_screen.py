@@ -1,12 +1,98 @@
-"""Tests for TUI module."""
+"""Tests for the select screen."""
 
 import os
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from photo_terminal.terminal.capabilities import GraphicsProtocol, detect_graphics_protocol
-from photo_terminal.tui import ImageSelector, select_images
+from photo_terminal.terminal.layout import Layout
+from photo_terminal.terminal.screens.select import ImageSelector, select_images
+
+from .conftest import MEASURED_CELL, FakeTerminal
+
+PLAIN_ENV = {"TERM": "xterm-256color"}
+
+
+@contextmanager
+def selector_on(images, fake_term):
+    """A selector whose every byte lands in ``fake_term``."""
+    with (
+        patch.dict(os.environ, PLAIN_ENV, clear=True),
+        patch(
+            "photo_terminal.terminal.screens.select.sample_terminal_size",
+            return_value=fake_term.size,
+        ),
+        patch(
+            "photo_terminal.terminal.screens.select.probe_cell_metrics",
+            return_value=MEASURED_CELL,
+        ),
+        patch("sys.stdout", fake_term.as_stdout()),
+    ):
+        selector = ImageSelector(images)
+        try:
+            yield selector
+        finally:
+            selector._pane.close()
+
+
+def many_images(tmp_path, count):
+    paths = []
+    for index in range(count):
+        path = tmp_path / f"image{index:03}.jpg"
+        path.write_bytes(b"")
+        paths.append(path)
+    return paths
+
+
+class TestScrollWindow:
+    """A folder with more images than the window is tall used to paint all of
+    them, straight past the bottom of the terminal."""
+
+    def test_a_long_list_stays_inside_its_pane(self, tmp_path):
+        fake_term = FakeTerminal(size=os.terminal_size((178, 30)), cell_px=MEASURED_CELL.px)
+        with selector_on(many_images(tmp_path, 80), fake_term) as selector:
+            selector.render()
+
+        layout = Layout.for_terminal(fake_term.size, MEASURED_CELL)
+        touched = fake_term.cells_touched()
+        assert touched <= layout.preview_box | layout.list_pane
+        assert max(row for _, row in touched) <= layout.list_pane.height
+
+    def test_the_cursor_stays_in_view_while_moving_down(self, tmp_path):
+        fake_term = FakeTerminal(size=os.terminal_size((178, 30)), cell_px=MEASURED_CELL.px)
+        images = many_images(tmp_path, 80)
+        rows = layout_rows(fake_term)
+
+        with selector_on(images, fake_term) as selector:
+            for _ in range(len(images)):
+                selector.move_down()
+                selector.render()
+                start, stop = selector._view.window(rows)
+                assert start <= selector.current_index < stop
+
+    def test_the_position_is_shown_while_the_list_scrolls(self, tmp_path):
+        fake_term = FakeTerminal(size=os.terminal_size((178, 30)), cell_px=MEASURED_CELL.px)
+        with selector_on(many_images(tmp_path, 80), fake_term) as selector:
+            selector.render()
+
+        assert b"of 80" in fake_term.bytes_written
+
+    def test_a_list_that_fits_shows_no_position_marker(self, sample_images):
+        fake_term = FakeTerminal(size=os.terminal_size((178, 58)), cell_px=MEASURED_CELL.px)
+        with selector_on(sample_images, fake_term) as selector:
+            selector.render()
+
+        assert b"of 3" not in fake_term.bytes_written
+
+
+def layout_rows(fake_term):
+    """How many list rows the window has room for, mirroring the screen."""
+    from photo_terminal.terminal.screens.select import FOOTER_HEIGHT, HEADER_HEIGHT
+
+    layout = Layout.for_terminal(fake_term.size, MEASURED_CELL)
+    return layout.list_pane.height - HEADER_HEIGHT - FOOTER_HEIGHT
 
 
 class TestImageSelector:
@@ -93,7 +179,7 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("photo_terminal.tui.ImageSelector")
+    @patch("photo_terminal.terminal.screens.select.ImageSelector")
     def test_select_images_user_cancels(self, mock_selector_class, sample_images):
         """Test select_images when user cancels."""
         # Mock selector to return None (cancelled)
@@ -106,7 +192,7 @@ class TestSelectImages:
 
         assert exc_info.value.code == 1
 
-    @patch("photo_terminal.tui.ImageSelector")
+    @patch("photo_terminal.terminal.screens.select.ImageSelector")
     def test_select_images_success(self, mock_selector_class, sample_images):
         """Test successful image selection."""
         # Mock selector to return selected images
@@ -119,7 +205,7 @@ class TestSelectImages:
 
         assert result == selected_images
 
-    @patch("photo_terminal.tui.ImageSelector")
+    @patch("photo_terminal.terminal.screens.select.ImageSelector")
     def test_select_images_keyboard_interrupt(self, mock_selector_class, sample_images):
         """Test select_images when user presses Ctrl+C."""
         # Mock selector to raise KeyboardInterrupt

@@ -25,7 +25,9 @@ from photo_terminal.processor import InsufficientDiskSpaceError, ProcessingError
 from photo_terminal.s3_browser import browse_s3_folders
 from photo_terminal.scanner import scan_folder
 from photo_terminal.summary import show_completion_summary
-from photo_terminal.tui import select_images, show_processing_config
+from photo_terminal.terminal.screens.processing_config import show_processing_config
+from photo_terminal.terminal.screens.reorder import reorder_images_interactive
+from photo_terminal.terminal.screens.select import select_images
 from photo_terminal.uploader import UploadError, upload_images
 
 
@@ -185,13 +187,6 @@ Configuration:
         response = "n"
 
     if response in ("y", "yes"):
-        try:
-            from photo_terminal.reorder_ui import reorder_images_interactive
-        except ImportError:
-            print("\nError: Missing required dependency for image reordering")
-            print("Install with: pip install readchar")
-            return 1
-
         print()
         try:
             result = reorder_images_interactive(selected_images)

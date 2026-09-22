@@ -15,22 +15,28 @@ Two things are genuinely new:
   entry per (path, mode, width, height) tuple. Eviction of a Kitty frame also
   frees the terminal's copy of the pixels, which is what keeps the terminal's
   memory tracking ours.
+
+The pool and the pipe themselves now live in
+:class:`~photo_terminal.terminal.background.BackgroundWorker`, because the S3
+browser needs exactly the same thing to get its listings off the keystroke loop.
+What is left here is what is specific to previews: the key, the cache, and what
+eviction owes the terminal.
 """
 
 from __future__ import annotations
 
 import functools
 import logging
-import os
 import threading
 from collections import OrderedDict
 from collections.abc import Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
+from photo_terminal.terminal.background import DEFAULT_WORKERS, BackgroundWorker
 from photo_terminal.terminal.capabilities import GraphicsProtocol
 from photo_terminal.terminal.geometry import CellMetrics, Size, fit
 from photo_terminal.terminal.preview import kitty
@@ -44,7 +50,6 @@ from photo_terminal.terminal.preview.halfblock import render_image_to_ansi_from_
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKERS = 4
 DEFAULT_CACHE_ENTRIES = 12
 """Enough for the cursor plus several screens of preloaded neighbours, bounded
 so a long folder cannot grow the cache without limit."""
@@ -78,36 +83,28 @@ class PreviewService:
         self._protocol = protocol
         self._cell = cell
         self._max_entries = max(1, max_entries)
-        self._executor = ThreadPoolExecutor(max_workers=workers)
+        self._worker = BackgroundWorker(workers=workers)
         self._futures: dict[PreviewKey, Future[PreviewFrame]] = {}
         self._cache: OrderedDict[PreviewKey, PreviewFrame] = OrderedDict()
         self._lock = threading.Lock()
-        self._dirty = False
         self._pending = bytearray()
         self._ids: Iterator[int] = kitty.image_ids()
-        self._notify_r, self._notify_w = os.pipe()
-        os.set_blocking(self._notify_r, False)
-        self._closed = False
 
     # -- the input loop's half ------------------------------------------- #
 
     @property
     def wait_fd(self) -> int:
         """Fold this into the input loop's ``select`` set to be woken by a render."""
-        return self._notify_r
+        return self._worker.wait_fd
 
     @property
     def dirty(self) -> bool:
         """Whether a render has landed since the last :meth:`drain`."""
-        return self._dirty
+        return self._worker.dirty
 
     def drain(self) -> None:
         """Consume the wakeup and clear the dirty flag."""
-        try:
-            os.read(self._notify_r, 1024)
-        except OSError:
-            pass
-        self._dirty = False
+        self._worker.drain()
 
     # -- the render path's half ------------------------------------------ #
 
@@ -149,29 +146,22 @@ class PreviewService:
 
     def close(self) -> None:
         """Shut the pool down and close the pipe. Idempotent."""
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:  # pragma: no cover - shutdown is best-effort
-            logger.debug("preview executor shutdown failed", exc_info=True)
-        for fd in (self._notify_r, self._notify_w):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        self._worker.close()
 
     # -- internals -------------------------------------------------------- #
 
     def _schedule(self, key: PreviewKey) -> None:
-        if self._closed:
+        if self._worker.closed:
             return
         with self._lock:
             if key in self._futures or key in self._cache:
                 return
-            future = self._executor.submit(self._render, key)
+            future = self._worker.submit(functools.partial(self._render, key))
+            if future is None:
+                return
             self._futures[key] = future
+        # Outside the lock: a callback on an already-finished future runs inline
+        # here, and `_store` wants the same lock.
         future.add_done_callback(functools.partial(self._store, key))
 
     def _render(self, key: PreviewKey) -> PreviewFrame:
@@ -224,11 +214,7 @@ class PreviewService:
             while len(self._cache) > self._max_entries:
                 _, evicted = self._cache.popitem(last=False)
                 self._pending.extend(self._eviction_bytes(evicted))
-            self._dirty = True
-            try:
-                os.write(self._notify_w, b"\x00")
-            except OSError:
-                pass
+        self._worker.notify()
 
     @staticmethod
     def _eviction_bytes(frame: PreviewFrame) -> bytes:

@@ -2,7 +2,8 @@
 
 These four tests started life as ``xfail(strict=True)`` reproductions against the
 old render path and pass against the new one. They drive the real
-:class:`~photo_terminal.tui.ImageSelector` against real image fixtures and assert
+:class:`~photo_terminal.terminal.screens.select.ImageSelector` against real image
+fixtures and assert
 on the bytes it actually writes.
 
 The bug, for the record. The preview was produced by shelling out to an external
@@ -41,7 +42,8 @@ from PIL import Image
 from photo_terminal.terminal.geometry import CellMetrics, Size
 from photo_terminal.terminal.layout import Layout
 from photo_terminal.terminal.preview.frames import KittyFrame
-from photo_terminal.tui import ImageSelector
+from photo_terminal.terminal.screens.preview_pane import TOO_SMALL_MESSAGE
+from photo_terminal.terminal.screens.select import ImageSelector
 
 from .conftest import MEASURED_CELL, FakeTerminal
 
@@ -61,15 +63,18 @@ def selector_on(
     """An ``ImageSelector`` whose every byte lands in ``fake_term``."""
     with (
         patch.dict(os.environ, environment, clear=True),
-        patch("photo_terminal.tui.os.get_terminal_size", return_value=fake_term.size),
-        patch("photo_terminal.tui._probe_cell_metrics", return_value=cell),
+        patch(
+            "photo_terminal.terminal.screens.select.sample_terminal_size",
+            return_value=fake_term.size,
+        ),
+        patch("photo_terminal.terminal.screens.select.probe_cell_metrics", return_value=cell),
         patch("sys.stdout", fake_term.as_stdout()),
     ):
         selector = ImageSelector(images)
         try:
             yield selector
         finally:
-            selector._preview.close()
+            selector._pane.close()
 
 
 SETTLED = ("ready", "too-small")
@@ -85,11 +90,11 @@ def render_until_ready(selector: ImageSelector, timeout: float = 5.0) -> None:
     """
     deadline = time.monotonic() + timeout
     while True:
-        if selector._preview.dirty:
-            selector._preview.drain()
+        if selector._pane.dirty:
+            selector._pane.drain()
         selector.render()
 
-        token = selector._painted_token
+        token = selector._pane.token
         if token is not None and token[-1] in SETTLED:
             return
         if time.monotonic() > deadline:
@@ -144,7 +149,7 @@ def test_kitty_placement_is_bounded_and_quiet(
 
     with selector_on([source], fake_term, GHOSTTY_ENV) as selector:
         render_until_ready(selector)
-        placement = selector._painted
+        placement = selector._pane.painted
 
     assert isinstance(placement, KittyFrame)
 
@@ -173,7 +178,7 @@ def test_requested_rectangle_matches_the_source_aspect(
     fake_term = FakeTerminal(size=os.terminal_size(size), cell_px=MEASURED_CELL.px)
     with selector_on([source], fake_term, GHOSTTY_ENV) as selector:
         render_until_ready(selector)
-        placement = selector._painted
+        placement = selector._pane.painted
 
     assert isinstance(placement, KittyFrame)
 
@@ -196,12 +201,12 @@ def test_navigation_deletes_the_outgoing_placement(
     explicit ``a=d`` is the only thing that can remove the previous preview."""
     with selector_on(sample_images, fake_term, GHOSTTY_ENV) as selector:
         render_until_ready(selector)
-        outgoing = selector._painted
+        outgoing = selector._pane.painted
         assert isinstance(outgoing, KittyFrame)
 
         selector.move_down()
         render_until_ready(selector)
-        incoming = selector._painted
+        incoming = selector._pane.painted
         assert isinstance(incoming, KittyFrame)
 
     commands = fake_term.kitty_commands()
@@ -225,7 +230,7 @@ def test_returning_to_a_cached_image_re_places_rather_than_re_transmits(
 ) -> None:
     with selector_on(sample_images, fake_term, GHOSTTY_ENV) as selector:
         render_until_ready(selector)
-        first = selector._painted
+        first = selector._pane.painted
         assert isinstance(first, KittyFrame)
 
         selector.move_down()
@@ -248,11 +253,16 @@ def test_returning_to_a_cached_image_re_places_rather_than_re_transmits(
 def test_a_cramped_window_shows_a_message_instead_of_a_sliver(
     sample_images: list[Path],
 ) -> None:
+    """A window too narrow for two panes gives its columns to the list, and
+    says why in the footer rather than painting a sliver of a photograph."""
     fake_term = FakeTerminal(size=os.terminal_size((60, 20)), cell_px=MEASURED_CELL.px)
 
     with selector_on(sample_images, fake_term, GHOSTTY_ENV) as selector:
         selector.render()
 
     assert fake_term.kitty_commands() == []
+    assert TOO_SMALL_MESSAGE.encode() in fake_term.bytes_written
+
     layout = layout_for(fake_term)
-    assert fake_term.cells_touched() <= layout.preview_box | layout.list_pane
+    assert layout.preview_suppressed
+    assert fake_term.cells_touched() <= layout.list_pane | layout.footer

@@ -162,9 +162,11 @@ class ImageReorderer:
         else:
             return self.grab()
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset to original image order."""
-        self.state.images = self.state.original_order.copy()
+        # __post_init__ always fills this in; the guard is for the type checker.
+        if self.state.original_order is not None:
+            self.state.images = self.state.original_order.copy()
         self.state.current_index = 0
         self.state.grabbed_index = None
 

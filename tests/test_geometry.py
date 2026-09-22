@@ -20,10 +20,11 @@ from photo_terminal.terminal.geometry import (
     fit,
 )
 from photo_terminal.terminal.layout import (
-    LIST_PANE_WIDTH,
+    GUTTER,
+    MIN_LIST_WIDTH,
     MIN_PREVIEW_HEIGHT,
     MIN_PREVIEW_WIDTH,
-    PREVIEW_LEFT,
+    PREFERRED_LIST_WIDTH,
     RIGHT_MARGIN,
     Layout,
 )
@@ -177,10 +178,32 @@ class TestLayout:
         columns, lines = size
         layout = Layout.for_terminal(os.terminal_size(size), measured_cell)
 
-        assert layout.preview_box.left == PREVIEW_LEFT
+        assert layout.preview_box.left == layout.list_pane.width + GUTTER + 1
         assert layout.preview_box.left + layout.preview_box.width - 1 == columns - RIGHT_MARGIN
         assert layout.preview_box.top + layout.preview_box.height - 1 == lines - 2
-        assert layout.list_pane.width <= LIST_PANE_WIDTH
+        assert layout.list_pane.width <= PREFERRED_LIST_WIDTH
+
+    @pytest.mark.parametrize("size", TERMINAL_SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
+    def test_the_list_pane_is_responsive_between_its_floor_and_its_preference(
+        self, size, measured_cell
+    ):
+        """A fixed 55-column list left an 80-column window 19 columns of
+        preview, one short of the threshold, so a standard terminal got no
+        preview at all. The pane shrinks with the window instead."""
+        layout = Layout.for_terminal(os.terminal_size(size), measured_cell)
+        assert MIN_LIST_WIDTH <= layout.list_pane.width <= PREFERRED_LIST_WIDTH
+
+    def test_a_wide_window_still_gets_the_preferred_list_width(self, measured_cell):
+        layout = Layout.for_terminal(os.terminal_size((178, 58)), measured_cell)
+
+        assert layout.list_pane.width == PREFERRED_LIST_WIDTH
+        assert layout.preview_box.left == 60  # unchanged from the fixed layout
+
+    def test_a_standard_eighty_column_window_gets_a_usable_preview(self, measured_cell):
+        layout = Layout.for_terminal(os.terminal_size((80, 24)), measured_cell)
+
+        assert layout.preview_suppressed is False
+        assert layout.preview_box.width >= MIN_PREVIEW_WIDTH
 
     def test_the_footer_sits_below_both_panes(self, measured_cell):
         layout = Layout.for_terminal(os.terminal_size((178, 58)), measured_cell)
@@ -189,25 +212,28 @@ class TestLayout:
         assert layout.footer.top == layout.preview_box.top + layout.preview_box.height
         assert layout.footer.height == 2
 
-    @pytest.mark.parametrize("size", [(100, 30), (178, 58), (240, 80)])
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30), (178, 58), (240, 80)])
     def test_a_usable_window_is_not_suppressed(self, size, measured_cell):
         layout = Layout.for_terminal(os.terminal_size(size), measured_cell)
         assert layout.preview_suppressed is False
 
-    @pytest.mark.parametrize("size", [(60, 20), (70, 24), (80, 24), (100, 8), (20, 10)])
+    @pytest.mark.parametrize("size", [(60, 20), (100, 8), (20, 10)])
     def test_a_cramped_window_suppresses_the_preview(self, size, measured_cell):
         """Below this a photograph is a handful of unreadable cells, so the
-        screen shows a message instead.
-
-        An 80-column window is in this set: a 55-column list pane leaves 19
-        columns, one short of the threshold. That is a consequence of the fixed
-        list width, and it is a message rather than a sliver of a photograph.
-        """
+        screen shows a message instead."""
         layout = Layout.for_terminal(os.terminal_size(size), measured_cell)
         assert layout.preview_suppressed is True
 
+    @pytest.mark.parametrize("size", [(60, 20), (100, 8), (20, 10)])
+    def test_a_suppressed_preview_gives_its_columns_to_the_list(self, size, measured_cell):
+        columns, _ = size
+        layout = Layout.for_terminal(os.terminal_size(size), measured_cell)
+
+        assert layout.preview_box.is_empty
+        assert layout.list_pane.width == columns
+
     def test_suppression_thresholds_are_the_declared_ones(self, measured_cell):
-        columns = PREVIEW_LEFT + RIGHT_MARGIN + MIN_PREVIEW_WIDTH - 1
+        columns = MIN_LIST_WIDTH + GUTTER + MIN_PREVIEW_WIDTH + RIGHT_MARGIN
         lines = MIN_PREVIEW_HEIGHT + 2
         layout = Layout.for_terminal(os.terminal_size((columns, lines)), measured_cell)
 

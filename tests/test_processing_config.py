@@ -9,7 +9,7 @@ key can finally be scripted here the way a terminal actually sends one.
 
 from pathlib import Path
 
-from photo_terminal.tui import show_processing_config
+from photo_terminal.terminal.screens.processing_config import show_processing_config
 
 LOCKED = [Path("/tmp/img1.jpg"), Path("/tmp/img2.jpg")]
 DOWN_ARROW = ["\x1b", "[", "B"]

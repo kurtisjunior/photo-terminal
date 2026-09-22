@@ -30,8 +30,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from photo_terminal.terminal.background import BackgroundWorker
 from photo_terminal.terminal.geometry import CellMetrics, Point, Size
-from photo_terminal.terminal.layout import PREVIEW_LEFT
+from photo_terminal.terminal.layout import Layout
 from photo_terminal.terminal.preview.service import PreviewService
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -69,6 +70,28 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     for report in skipped:
         reporter.write_line(f"  {report.nodeid}")
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.fixture(autouse=True)
+def close_background_workers(monkeypatch: pytest.MonkeyPatch):
+    """Close every :class:`BackgroundWorker` a test constructs.
+
+    A screen owns its worker for its own lifetime and closes it in ``run()``'s
+    ``finally``. A test that builds a screen without running it would otherwise
+    leak the worker's pipe pair - two descriptors per construction, growing
+    with the suite. ``close()`` is idempotent.
+    """
+    created: list[BackgroundWorker] = []
+    original = BackgroundWorker.__init__
+
+    def tracking_init(worker: BackgroundWorker, *args: object, **kwargs: object) -> None:
+        original(worker, *args, **kwargs)  # type: ignore[arg-type]
+        created.append(worker)
+
+    monkeypatch.setattr(BackgroundWorker, "__init__", tracking_init)
+    yield
+    for worker in created:
+        worker.close()
 
 
 @pytest.fixture(autouse=True)
@@ -146,9 +169,15 @@ class FakeTerminal:
     size: os.terminal_size = field(default_factory=lambda: os.terminal_size((178, 58)))
     # What TIOCGWINSZ would have reported; None means the pixel fields were zero.
     cell_px: Size | None = None
-    # The column the preview is anchored at, used by preview_payload().
-    preview_column: int = PREVIEW_LEFT
+    # The column the preview is anchored at, used by preview_payload(). Left
+    # at None it follows the layout for this terminal size, which is what the
+    # screen under test will have used.
+    preview_column: int | None = None
     _buffer: bytearray = field(default_factory=bytearray, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.preview_column is None:
+            self.preview_column = Layout.for_terminal(self.size, MEASURED_CELL).preview_box.left
 
     # -- writing ---------------------------------------------------------- #
 
