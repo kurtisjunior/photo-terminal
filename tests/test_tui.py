@@ -187,7 +187,7 @@ class TestNavigationLogic:
 class TestKeyboardSelection:
     """Tests for keyboard selection shortcuts."""
 
-    def test_y_key_selects_current_and_proceeds(self, sample_images):
+    def test_y_key_selects_current_and_proceeds(self, sample_images, scripted_keys):
         """Test that pressing 'y' toggles selection of current image (multi-stage workflow)."""
         selector = ImageSelector(sample_images)
         selector.current_index = 1  # Navigate to second image
@@ -196,20 +196,15 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 2}
 
         # Mock stdin: 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify all three images are selected (0, 2 were already selected, 1 was toggled on)
         assert len(result) == 3
         assert selector.selected_indices == {0, 1, 2}
 
-    def test_y_clears_other_selections(self, sample_images):
+    def test_y_clears_other_selections(self, sample_images, scripted_keys):
         """Test that pressing 'y' toggles selection (deselects if already selected)."""
         selector = ImageSelector(sample_images)
         selector.current_index = 2  # Navigate to third image
@@ -218,20 +213,15 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 1, 2}
 
         # Press 'y' to toggle off index 2, then Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify img3 (index 2) was toggled off, leaving 0 and 1
         assert len(result) == 2
         assert selector.selected_indices == {0, 1}
 
-    def test_a_key_selects_all(self, sample_images):
+    def test_a_key_selects_all(self, sample_images, scripted_keys):
         """Test that pressing 'a' with none selected selects all images."""
         selector = ImageSelector(sample_images)
 
@@ -239,21 +229,16 @@ class TestKeyboardSelection:
         assert len(selector.selected_indices) == 0
 
         # Press 'a' to select all, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["a", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify all images are selected
         assert len(result) == len(sample_images)
         assert set(result) == set(sample_images)
         assert selector.selected_indices == {0, 1, 2}
 
-    def test_a_key_deselects_all(self, sample_images):
+    def test_a_key_deselects_all(self, sample_images, scripted_keys):
         """Test that pressing 'a' with all selected deselects all images."""
         selector = ImageSelector(sample_images)
 
@@ -261,20 +246,15 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 1, 2}
 
         # Press 'a' (should deselect all), then 'q' to quit
-        with patch("sys.stdin.read", side_effect=["a", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["a", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify all selections are cleared
         assert result is None  # quit returns None
         assert len(selector.selected_indices) == 0
 
-    def test_a_key_with_partial_selection(self, sample_images):
+    def test_a_key_with_partial_selection(self, sample_images, scripted_keys):
         """Test that pressing 'a' with partial selection selects all."""
         selector = ImageSelector(sample_images)
 
@@ -282,56 +262,41 @@ class TestKeyboardSelection:
         selector.selected_indices = {0}
 
         # Press 'a' to select all, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["a", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify all images are now selected
         assert len(result) == len(sample_images)
         assert selector.selected_indices == {0, 1, 2}
 
-    def test_a_does_not_auto_confirm(self, sample_images):
+    def test_a_does_not_auto_confirm(self, sample_images, scripted_keys):
         """Test that pressing 'a' doesn't automatically return (needs Enter)."""
         selector = ImageSelector(sample_images)
 
         # Press 'a' then 'q' (not Enter)
-        with patch("sys.stdin.read", side_effect=["a", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["a", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (quit) not the selected images
         assert result is None
 
-    def test_spacebar_still_works(self, sample_images):
+    def test_spacebar_still_works(self, sample_images, scripted_keys):
         """Test that spacebar toggles selection as expected."""
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
         # Press spacebar twice (toggles on then off), then spacebar once more, then Enter to lock, 'n' to proceed
         # Net result: selected once
-        with patch("sys.stdin.read", side_effect=[" ", " ", " ", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys([" ", " ", " ", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Spacebar three times: on, off, on = selected
         assert result == [sample_images[1]]
 
-    def test_spacebar_toggles_selection(self, sample_images):
+    def test_spacebar_toggles_selection(self, sample_images, scripted_keys):
         """Test that spacebar properly toggles selection on and off."""
         selector = ImageSelector(sample_images)
         selector.current_index = 0
@@ -340,19 +305,14 @@ class TestKeyboardSelection:
         assert 0 not in selector.selected_indices
 
         # Toggle on with spacebar, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=[" ", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys([" ", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should have selected the first image
         assert result == [sample_images[0]]
 
-    def test_enter_still_works(self, sample_images):
+    def test_enter_still_works(self, sample_images, scripted_keys):
         """Test that Enter locks selections, then 'n' proceeds."""
         selector = ImageSelector(sample_images)
 
@@ -360,87 +320,62 @@ class TestKeyboardSelection:
         selector.selected_indices = {0, 2}
 
         # Press Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return the pre-selected images
         assert result == [sample_images[0], sample_images[2]]
 
-    def test_y_on_first_image(self, sample_images):
+    def test_y_on_first_image(self, sample_images, scripted_keys):
         """Test 'y' key on the first image (edge case)."""
         selector = ImageSelector(sample_images)
         selector.current_index = 0  # First image
 
         # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return only the first image
         assert result == [sample_images[0]]
         assert selector.selected_indices == {0}
 
-    def test_y_on_last_image(self, sample_images):
+    def test_y_on_last_image(self, sample_images, scripted_keys):
         """Test 'y' key on the last image (edge case)."""
         selector = ImageSelector(sample_images)
         selector.current_index = len(sample_images) - 1  # Last image
 
         # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return only the last image
         assert result == [sample_images[2]]
         assert selector.selected_indices == {2}
 
-    def test_uppercase_y_works(self, sample_images):
+    def test_uppercase_y_works(self, sample_images, scripted_keys):
         """Test that uppercase 'Y' works the same as lowercase 'y'."""
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
         # Press uppercase 'Y' to toggle, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["Y", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["Y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return only current image
         assert result == [sample_images[1]]
 
-    def test_uppercase_a_works(self, sample_images):
+    def test_uppercase_a_works(self, sample_images, scripted_keys):
         """Test that uppercase 'A' works the same as lowercase 'a'."""
         selector = ImageSelector(sample_images)
 
         # Press uppercase 'A' to select all, Enter to lock, 'n' to proceed
-        with patch("sys.stdin.read", side_effect=["A", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["A", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should select all images
         assert len(result) == len(sample_images)
@@ -491,19 +426,14 @@ class TestProtocolDetection:
 class TestMultiStageWorkflow:
     """Tests for the complete multi-stage workflow (mark → lock → proceed)."""
 
-    def test_full_workflow_success(self, sample_images):
+    def test_full_workflow_success(self, sample_images, scripted_keys):
         """Test complete workflow: mark → lock → proceed → success."""
         selector = ImageSelector(sample_images)
 
         # Mark first two images, then lock, then proceed
-        with patch("sys.stdin.read", side_effect=["y", "\x1b", "[", "B", " ", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\x1b", "[", "B", " ", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return 2 selected images
         assert result is not None
@@ -512,278 +442,197 @@ class TestMultiStageWorkflow:
         assert sample_images[1] in result
         assert selector._selections_locked is True
 
-    def test_lock_without_selection(self, sample_images):
+    def test_lock_without_selection(self, sample_images, scripted_keys):
         """Test trying to lock with no images selected (should do nothing)."""
         selector = ImageSelector(sample_images)
 
         # Try to lock without selecting anything, then quit
-        with patch("sys.stdin.read", side_effect=["\r", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["\r", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (quit), lock should not have happened
         assert result is None
         assert selector._selections_locked is False
         assert len(selector.selected_indices) == 0
 
-    def test_proceed_without_lock(self, sample_images):
+    def test_proceed_without_lock(self, sample_images, scripted_keys):
         """Test trying 'n' without locking (should be ignored)."""
         selector = ImageSelector(sample_images)
 
         # Mark an image, try 'n' without locking, then quit
-        with patch("sys.stdin.read", side_effect=["y", "n", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "n", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (quit), not proceed
         assert result is None
         assert selector._selections_locked is False
 
-    def test_lock_unlock_cycle(self, sample_images):
+    def test_lock_unlock_cycle(self, sample_images, scripted_keys):
         """Test lock, then unlock, then lock again."""
         selector = ImageSelector(sample_images)
 
         # Mark image, lock, unlock, lock again, proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "\r", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "\r", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return selected image, and be locked at end
         assert result is not None
         assert len(result) == 1
         assert selector._selections_locked is True
 
-    def test_mark_after_lock(self, sample_images):
+    def test_mark_after_lock(self, sample_images, scripted_keys):
         """Test that marking works even after locking (lock doesn't prevent changes)."""
         selector = ImageSelector(sample_images)
 
         # Mark first image, lock, mark second image, proceed
-        with patch("sys.stdin.read", side_effect=["y", "\r", "\x1b", "[", "B", "y", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "\x1b", "[", "B", "y", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should have both images selected (lock doesn't prevent changes in current implementation)
         assert result is not None
         assert len(result) == 2
 
-    def test_unlock_allows_changes(self, sample_images):
+    def test_unlock_allows_changes(self, sample_images, scripted_keys):
         """Test that after unlocking, can mark/unmark images again."""
         selector = ImageSelector(sample_images)
 
         # Mark image, lock, unlock, unmark image, mark different image, lock, proceed
-        with patch(
-            "sys.stdin.read", side_effect=["y", "\r", "\r", "y", "\x1b", "[", "B", "y", "\r", "n"]
-        ):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "\r", "y", "\x1b", "[", "B", "y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should have only second image (first was toggled off)
         assert result is not None
         assert len(result) == 1
         assert sample_images[1] in result
 
-    def test_cancel_during_selection(self, sample_images):
+    def test_cancel_during_selection(self, sample_images, scripted_keys):
         """Test pressing 'q' during marking stage."""
         selector = ImageSelector(sample_images)
 
         # Mark some images, then quit before locking
-        with patch("sys.stdin.read", side_effect=["y", "\x1b", "[", "B", "y", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\x1b", "[", "B", "y", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (cancelled)
         assert result is None
         assert selector._selections_locked is False
 
-    def test_cancel_during_locked(self, sample_images):
+    def test_cancel_during_locked(self, sample_images, scripted_keys):
         """Test pressing 'q' after locking."""
         selector = ImageSelector(sample_images)
 
         # Mark images, lock, then quit
-        with patch("sys.stdin.read", side_effect=["y", "\r", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (cancelled)
         assert result is None
         assert selector._selections_locked is True  # Lock state persists
 
-    def test_n_key_only_after_lock(self, sample_images):
+    def test_n_key_only_after_lock(self, sample_images, scripted_keys):
         """Test that 'n' key requires lock first."""
         selector = ImageSelector(sample_images)
 
         # Verify 'n' is ignored without lock
-        with patch("sys.stdin.read", side_effect=["y", "n", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "n", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should successfully return (first 'n' ignored, lock happened, second 'n' proceeded)
         assert result is not None
         assert len(result) == 1
 
-    def test_escape_key_cancels(self, sample_images):
+    def test_escape_key_cancels(self, sample_images, scripted_keys):
         """Test that Escape key cancels selection."""
         selector = ImageSelector(sample_images)
 
         # Mark images, then press Escape (without arrow key following)
-        with patch("sys.stdin.read", side_effect=["y", "\x1b", "x"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\x1b", "x"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return None (cancelled by Escape)
         assert result is None
 
-    def test_lock_state_preserved_across_navigation(self, sample_images):
+    def test_lock_state_preserved_across_navigation(self, sample_images, scripted_keys):
         """Test that lock state is preserved when navigating."""
         selector = ImageSelector(sample_images)
 
         # Mark, lock, navigate, verify lock persists
-        with patch(
-            "sys.stdin.read", side_effect=["y", "\r", "\x1b", "[", "B", "\x1b", "[", "A", "n"]
-        ):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "\x1b", "[", "B", "\x1b", "[", "A", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return selected images, lock should be active
         assert result is not None
         assert selector._selections_locked is True
 
-    def test_uppercase_n_works(self, sample_images):
+    def test_uppercase_n_works(self, sample_images, scripted_keys):
         """Test that uppercase 'N' works for proceeding."""
         selector = ImageSelector(sample_images)
 
         # Mark, lock, proceed with uppercase N
-        with patch("sys.stdin.read", side_effect=["y", "\r", "N"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\r", "N"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should successfully return
         assert result is not None
         assert len(result) == 1
 
-    def test_multiple_selections_before_lock(self, sample_images):
+    def test_multiple_selections_before_lock(self, sample_images, scripted_keys):
         """Test marking multiple images before locking."""
         selector = ImageSelector(sample_images)
 
         # Mark all three images, then lock, then proceed
-        with patch("sys.stdin.read", side_effect=["a", "\r", "n"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["a", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Should return all images
         assert result is not None
         assert len(result) == 3
         assert set(result) == set(sample_images)
 
-    def test_locked_indices_stored(self, sample_images):
+    def test_locked_indices_stored(self, sample_images, scripted_keys):
         """Test that locked indices are stored correctly."""
         selector = ImageSelector(sample_images)
 
         # Mark first and third images, lock
-        with patch(
-            "sys.stdin.read", side_effect=["y", "\x1b", "[", "B", "\x1b", "[", "B", "y", "\r", "n"]
-        ):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    result = selector.run()
+        scripted_keys(["y", "\x1b", "[", "B", "\x1b", "[", "B", "y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
 
         # Verify locked indices match selected indices
         assert selector._locked_indices == {0, 2}
         assert len(result) == 2
 
-    def test_unlock_clears_locked_indices(self, sample_images):
+    def test_unlock_clears_locked_indices(self, sample_images, scripted_keys):
         """Test that unlocking clears locked indices."""
         selector = ImageSelector(sample_images)
 
         # Mark, lock, unlock, quit
-        with patch("sys.stdin.read", side_effect=["y", "\r", "\r", "q"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    selector.run()
+        scripted_keys(["y", "\r", "\r", "q"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            selector.run()
 
         # Verify unlocked state
         assert selector._selections_locked is False
         assert len(selector._locked_indices) == 0
 
-    def test_ctrl_c_during_locked_stage(self, sample_images):
+    def test_ctrl_c_during_locked_stage(self, sample_images, scripted_keys):
         """Test Ctrl+C during locked stage raises KeyboardInterrupt."""
         selector = ImageSelector(sample_images)
 
         # Mark, lock, then Ctrl+C
-        with patch("sys.stdin.read", side_effect=["y", "\r", "\x03"]):
-            with patch.object(selector, "render"):
-                with patch.object(selector._preview, "request"):
-                    with patch("sys.stdin.fileno", return_value=0):
-                        with patch("termios.tcgetattr", return_value=[]):
-                            with patch("termios.tcsetattr"):
-                                with patch("tty.setraw"):
-                                    with pytest.raises(KeyboardInterrupt):
-                                        selector.run()
+        scripted_keys(["y", "\r", "\x03"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            with pytest.raises(KeyboardInterrupt):
+                selector.run()

@@ -20,8 +20,13 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
+import termios
+import tty
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -87,6 +92,35 @@ def close_preview_services(monkeypatch: pytest.MonkeyPatch):
     yield
     for service in created:
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# Scripted keyboard input
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def scripted_keys(monkeypatch: pytest.MonkeyPatch):
+    """Drive a screen's input loop from a list of characters.
+
+    Every screen now reads through ``terminal.input``, so one fake serves all of
+    them. The characters are fed one at a time exactly as a terminal would
+    deliver them, escape sequences included: ``["\x1b", "[", "B"]`` is a down
+    arrow. ``termios`` and ``tty`` are neutralised at the same time, because a
+    test process's stdin is not a terminal and the session would otherwise
+    decline to enter raw mode.
+    """
+
+    def install(keys: Sequence[str]) -> MagicMock:
+        reader = MagicMock(side_effect=list(keys))
+        monkeypatch.setattr(sys.stdin, "read", reader, raising=False)
+        monkeypatch.setattr(sys.stdin, "fileno", lambda: 0, raising=False)
+        monkeypatch.setattr(termios, "tcgetattr", lambda fd: [])
+        monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, mode: None)
+        monkeypatch.setattr(tty, "setraw", lambda fd, when=None: None)
+        return reader
+
+    return install
 
 
 # --------------------------------------------------------------------------- #

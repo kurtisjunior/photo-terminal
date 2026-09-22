@@ -28,24 +28,20 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from photo_terminal.input_utils import (
+from photo_terminal.terminal.capabilities import detect_graphics_protocol
+from photo_terminal.terminal.frame import CLEAR_AND_HOME, HOME, Frame
+from photo_terminal.terminal.geometry import CellMetrics, Point
+from photo_terminal.terminal.input import (
     KEY_DOWN,
     KEY_ESC,
     KEY_UP,
+    read_key,
     read_key_with_timeout_or_signal,
 )
-from photo_terminal.terminal.capabilities import detect_graphics_protocol
-from photo_terminal.terminal.frame import (
-    CLEAR_AND_HOME,
-    HIDE_CURSOR,
-    HOME,
-    SHOW_CURSOR,
-    Frame,
-)
-from photo_terminal.terminal.geometry import CellMetrics, Point
 from photo_terminal.terminal.layout import Layout
 from photo_terminal.terminal.preview.frames import MessageFrame, PreviewFrame
 from photo_terminal.terminal.preview.service import PreviewService
+from photo_terminal.terminal.session import TerminalSession
 
 # Pre-compiled regex for stripping ANSI escape codes (hot path optimisation)
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
@@ -279,116 +275,98 @@ class ImageSelector:
         Raises:
             SystemExit: If user cancels (q/Escape)
         """
-        # Import here to avoid issues if not in interactive terminal
-        import termios
-        import tty
-
-        # Save terminal settings
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-
         logger.info("Starting TUI selector")
 
         try:
-            # Set terminal to raw mode for key capture
-            tty.setraw(fd)
-
-            # Hide cursor
-            sys.stdout.write(HIDE_CURSOR)
-            sys.stdout.flush()
-
-            # Warm the first screenful before the initial paint
-            layout = Layout.for_terminal(self._terminal_size, self._cell)
-            if not layout.preview_suppressed and not layout.preview_box.is_empty:
-                for i in range(min(STARTUP_PRELOAD, len(self.images))):
-                    self._preview.request(self.images[i], layout.preview_box.size)
-
-            # Initial render
-            self.render()
-
-            while True:
-                # Read key with a short timeout; wakes immediately on preview completion
-                key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._preview.wait_fd])
-
-                if key is None:
-                    if self._preview.dirty:
-                        self._preview.drain()
-                        self.render()
-                    continue
-
-                # Handle navigation keys
-                if key == KEY_UP:
-                    logger.debug("Up arrow pressed")
-                    self.move_up()
-                elif key == KEY_DOWN:
-                    logger.debug("Down arrow pressed")
-                    self.move_down()
-                elif key == KEY_ESC:
-                    logger.info("Escape pressed, exiting")
-                    return None
-
-                # Handle other keys
-                elif key == " ":  # Spacebar
-                    logger.debug("Space pressed")
-                    self.toggle_selection()
-                elif key == "\r" or key == "\n":  # Enter
-                    logger.info("Enter pressed")
-                    if not self._selections_locked:
-                        # Lock the selections
-                        if not self.selected_indices:
-                            # No images selected, continue
-                            logger.warning("No images selected, cannot lock")
-                            continue
-                        self._selections_locked = True
-                        self._locked_indices = self.selected_indices.copy()
-                        logger.info(f"Selections locked: {len(self._locked_indices)} images")
-                    else:
-                        # Unlock the selections
-                        self._selections_locked = False
-                        self._locked_indices = set()
-                        logger.info("Selections unlocked")
-                    # Don't return - stay in the loop
-                elif key in ("y", "Y", "x", "X"):
-                    # Just mark the image, don't proceed
-                    logger.info(f"'{key}' pressed - toggling selection")
-                    self.toggle_selection()
-                elif key == "n" or key == "N":
-                    if not self._selections_locked:
-                        logger.info("'n' pressed but selections not locked - ignoring")
-                        continue
-                    logger.info("'n' pressed - proceeding to next stage")
-                    return self.get_selected_images()
-                elif key == "a" or key == "A":
-                    # Toggle select all
-                    logger.info("'a' pressed - toggling select all")
-                    if len(self.selected_indices) == len(self.images):
-                        # All selected, deselect all
-                        self.selected_indices = set()
-                        logger.info("Deselected all images")
-                    else:
-                        # Some or none selected, select all
-                        self.selected_indices = set(range(len(self.images)))
-                        logger.info(f"Selected all {len(self.images)} images")
-                    # Don't return - let user confirm with Enter
-                elif key == "q" or key == "Q":  # Quit
-                    logger.info("Q pressed, exiting")
-                    return None
-                elif key == "\x03":  # Ctrl+C
-                    logger.info("Ctrl+C pressed")
-                    raise KeyboardInterrupt
-
-                # Redraw with new preview
-                self.render()
-
+            with TerminalSession():
+                return self._loop()
         finally:
-            # Restore terminal settings. The full clear is what removes any
-            # graphics placement still on screen; the alternate screen buffer
-            # replaces it in phase 3.
-            sys.stdout.write(SHOW_CURSOR)
-            sys.stdout.write(CLEAR_AND_HOME)
-            sys.stdout.flush()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             self._preview.close()
+
+    def _loop(self) -> list[Path] | None:
+        """The key loop, inside a terminal the session already owns."""
+        # Warm the first screenful before the initial paint
+        layout = Layout.for_terminal(self._terminal_size, self._cell)
+        if not layout.preview_suppressed and not layout.preview_box.is_empty:
+            for i in range(min(STARTUP_PRELOAD, len(self.images))):
+                self._preview.request(self.images[i], layout.preview_box.size)
+
+        # Initial render
+        self.render()
+
+        while True:
+            # Read key with a short timeout; wakes immediately on preview completion
+            key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._preview.wait_fd])
+
+            if key is None:
+                if self._preview.dirty:
+                    self._preview.drain()
+                    self.render()
+                continue
+
+            # Handle navigation keys
+            if key == KEY_UP:
+                logger.debug("Up arrow pressed")
+                self.move_up()
+            elif key == KEY_DOWN:
+                logger.debug("Down arrow pressed")
+                self.move_down()
+            elif key == KEY_ESC:
+                logger.info("Escape pressed, exiting")
+                return None
+
+            # Handle other keys
+            elif key == " ":  # Spacebar
+                logger.debug("Space pressed")
+                self.toggle_selection()
+            elif key == "\r" or key == "\n":  # Enter
+                logger.info("Enter pressed")
+                if not self._selections_locked:
+                    # Lock the selections
+                    if not self.selected_indices:
+                        # No images selected, continue
+                        logger.warning("No images selected, cannot lock")
+                        continue
+                    self._selections_locked = True
+                    self._locked_indices = self.selected_indices.copy()
+                    logger.info(f"Selections locked: {len(self._locked_indices)} images")
+                else:
+                    # Unlock the selections
+                    self._selections_locked = False
+                    self._locked_indices = set()
+                    logger.info("Selections unlocked")
+                # Don't return - stay in the loop
+            elif key in ("y", "Y", "x", "X"):
+                # Just mark the image, don't proceed
+                logger.info(f"'{key}' pressed - toggling selection")
+                self.toggle_selection()
+            elif key == "n" or key == "N":
+                if not self._selections_locked:
+                    logger.info("'n' pressed but selections not locked - ignoring")
+                    continue
+                logger.info("'n' pressed - proceeding to next stage")
+                return self.get_selected_images()
+            elif key == "a" or key == "A":
+                # Toggle select all
+                logger.info("'a' pressed - toggling select all")
+                if len(self.selected_indices) == len(self.images):
+                    # All selected, deselect all
+                    self.selected_indices = set()
+                    logger.info("Deselected all images")
+                else:
+                    # Some or none selected, select all
+                    self.selected_indices = set(range(len(self.images)))
+                    logger.info(f"Selected all {len(self.images)} images")
+                # Don't return - let user confirm with Enter
+            elif key == "q" or key == "Q":  # Quit
+                logger.info("Q pressed, exiting")
+                return None
+            elif key == "\x03":  # Ctrl+C
+                logger.info("Ctrl+C pressed")
+                raise KeyboardInterrupt
+
+            # Redraw with new preview
+            self.render()
 
 
 def _stdout_fd() -> int | None:
@@ -431,9 +409,6 @@ def show_processing_config(
     Returns:
         Processing configuration dict with user's choices
     """
-    import termios
-    import tty
-
     console = Console()
 
     # Available output formats
@@ -448,10 +423,6 @@ def show_processing_config(
 
     current_option = 0  # Currently highlighted option
     option_keys = list(options.keys())
-
-    # Save terminal settings
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
 
     def render_config_screen():
         """Render the configuration screen."""
@@ -538,35 +509,27 @@ def show_processing_config(
         controls.append("q/Esc: Cancel", style="dim")
         console.print(controls)
 
-    try:
-        # Set terminal to raw mode
-        tty.setraw(fd)
-
-        # Hide cursor
-        sys.stdout.write(HIDE_CURSOR)
-        sys.stdout.flush()
-
+    with TerminalSession():
         # Initial render
         render_config_screen()
 
         while True:
-            # Read a single character
-            char = sys.stdin.read(1)
+            # One reader for every screen: a bare ESC acts immediately instead
+            # of blocking until the next keypress.
+            char = read_key()
 
-            # Handle escape sequences (arrow keys)
-            if char == "\x1b":  # ESC
-                next_char = sys.stdin.read(1)
-                if next_char == "[":
-                    arrow = sys.stdin.read(1)
-                    if arrow == "A":  # Up arrow
-                        current_option = max(0, current_option - 1)
-                    elif arrow == "B":  # Down arrow
-                        current_option = min(len(option_keys) - 1, current_option + 1)
-                else:
-                    # Escape key pressed (without arrow)
-                    return None
+            if char is None:  # an escape sequence this screen has no use for
+                continue
 
-            # Handle other keys
+            if char == KEY_UP:
+                current_option = max(0, current_option - 1)
+
+            elif char == KEY_DOWN:
+                current_option = min(len(option_keys) - 1, current_option + 1)
+
+            elif char == KEY_ESC:
+                return None
+
             elif char == " ":  # Spacebar - toggle/cycle current option
                 option_key = option_keys[current_option]
                 if option_key == "output_format":
@@ -600,12 +563,6 @@ def show_processing_config(
 
             # Redraw screen
             render_config_screen()
-
-    finally:
-        # Restore terminal settings
-        sys.stdout.write(SHOW_CURSOR)
-        sys.stdout.flush()
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def select_images(images: list[Path]) -> list[Path]:

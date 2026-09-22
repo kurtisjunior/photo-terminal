@@ -10,8 +10,6 @@ Provides a terminal interface for navigating S3 bucket structure:
 - Tests S3 access on startup for fail-fast error handling
 """
 
-import sys
-
 import boto3
 from botocore.exceptions import (
     BotoCoreError,
@@ -25,6 +23,9 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+from photo_terminal.terminal.input import KEY_DOWN, KEY_ESC, KEY_UP, read_key
+from photo_terminal.terminal.session import TerminalSession
 
 
 class S3AccessError(Exception):
@@ -303,58 +304,42 @@ class S3FolderBrowser:
         Raises:
             SystemExit: If user cancels
         """
-        # Import here to avoid issues if not in interactive terminal
-        import termios
-        import tty
-
         # Load initial folder list
         self.load_folders()
 
-        # Save terminal settings
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-
-        try:
-            # Set terminal to raw mode for key capture
-            tty.setraw(fd)
-
+        with TerminalSession():
             with Live(self.create_panel(), console=self.console, refresh_per_second=4) as live:
                 while True:
-                    # Read a single character
-                    char = sys.stdin.read(1)
+                    # One reader for every screen: a bare ESC cancels straight
+                    # away rather than waiting out the next keypress.
+                    key = read_key()
 
-                    # Handle escape sequences (arrow keys)
-                    if char == "\x1b":  # ESC
-                        next_char = sys.stdin.read(1)
-                        if next_char == "[":
-                            arrow = sys.stdin.read(1)
-                            if arrow == "A":  # Up arrow
-                                self.move_up()
-                            elif arrow == "B":  # Down arrow
-                                self.move_down()
-                        else:
-                            # Escape key pressed (without arrow)
-                            raise SystemExit(1)
+                    if key is None:  # an escape sequence this screen ignores
+                        continue
 
-                    # Handle other keys
-                    elif char == "\r" or char == "\n":  # Enter
+                    if key == KEY_UP:
+                        self.move_up()
+
+                    elif key == KEY_DOWN:
+                        self.move_down()
+
+                    elif key == KEY_ESC:
+                        raise SystemExit(1)
+
+                    elif key == "\r" or key == "\n":  # Enter
                         result = self.handle_selection()
                         if result is not None:
                             # User selected a folder
                             return result
 
-                    elif char == "q" or char == "Q":  # Quit
+                    elif key == "q" or key == "Q":  # Quit
                         raise SystemExit(1)
 
-                    elif char == "\x03":  # Ctrl+C
+                    elif key == "\x03":  # Ctrl+C
                         raise KeyboardInterrupt
 
                     # Update the display
                     live.update(self.create_panel())
-
-        finally:
-            # Restore terminal settings
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def browse_s3_folders(

@@ -1,9 +1,19 @@
-"""Tests for processing configuration UI."""
+"""Tests for the processing configuration screen.
+
+These used to mock ``sys.stdin`` by hand in every test, because this screen was
+one of the two that bypassed the shared reader and parsed escape sequences
+itself. It now goes through ``terminal.input`` like every other screen, so it
+is driven by the shared ``scripted_keys`` fixture - which also means an arrow
+key can finally be scripted here the way a terminal actually sends one.
+"""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from photo_terminal.tui import show_processing_config
+
+LOCKED = [Path("/tmp/img1.jpg"), Path("/tmp/img2.jpg")]
+DOWN_ARROW = ["\x1b", "[", "B"]
+UP_ARROW = ["\x1b", "[", "A"]
 
 
 class TestShowProcessingConfig:
@@ -11,10 +21,6 @@ class TestShowProcessingConfig:
 
     def test_returns_dict_structure(self):
         """Test that function signature and dict structure are correct."""
-        # This is a structure test - actual UI testing requires terminal interaction
-
-        # We can't easily test the interactive UI without mocking stdin/termios
-        # but we can verify the function exists and has correct signature
         assert callable(show_processing_config)
 
         # Verify docstring exists
@@ -22,120 +28,76 @@ class TestShowProcessingConfig:
         assert "locked_images" in show_processing_config.__doc__
         assert "config" in show_processing_config.__doc__
 
-    @patch("sys.stdin")
-    @patch("termios.tcgetattr")
-    @patch("termios.tcsetattr")
-    @patch("tty.setraw")
-    def test_confirm_returns_valid_dict(
-        self, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_stdin
-    ):
+    def test_confirm_returns_valid_dict(self, scripted_keys):
         """Test that confirming returns a properly structured dict."""
-        # Mock terminal settings
-        mock_tcgetattr.return_value = []
+        scripted_keys(["y"])
 
-        # Simulate user pressing Enter immediately (confirm defaults)
-        mock_stdin.read = MagicMock(side_effect=["y"])
-        mock_stdin.fileno = MagicMock(return_value=0)
+        result = show_processing_config(LOCKED, {"target_size_kb": 500})
 
-        locked_images = [Path("/tmp/img1.jpg"), Path("/tmp/img2.jpg")]
-        config = {"target_size_kb": 500}
-
-        result = show_processing_config(locked_images, config)
-
-        # Verify result structure
         assert isinstance(result, dict)
-        assert "resize" in result
-        assert "target_size_kb" in result
-        assert "preserve_exif" in result
-
-        # Verify default values
         assert result["resize"] is True
         assert result["preserve_exif"] is True
         assert result["target_size_kb"] == 500
+        assert result["output_format"] == "JPEG"
 
-    @patch("sys.stdin")
-    @patch("termios.tcgetattr")
-    @patch("termios.tcsetattr")
-    @patch("tty.setraw")
-    def test_cancel_returns_none(self, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_stdin):
+    def test_cancel_returns_none(self, scripted_keys):
         """Test that pressing 'q' returns None."""
-        # Mock terminal settings
-        mock_tcgetattr.return_value = []
+        scripted_keys(["q"])
 
-        # Simulate user pressing 'q' to cancel
-        mock_stdin.read = MagicMock(side_effect=["q"])
-        mock_stdin.fileno = MagicMock(return_value=0)
+        assert show_processing_config(LOCKED, {"target_size_kb": 400}) is None
 
-        locked_images = [Path("/tmp/img1.jpg")]
-        config = {"target_size_kb": 400}
-
-        result = show_processing_config(locked_images, config)
-
-        # Verify None is returned on cancel
-        assert result is None
-
-    @patch("sys.stdin")
-    @patch("termios.tcgetattr")
-    @patch("termios.tcsetattr")
-    @patch("tty.setraw")
-    def test_back_returns_none(self, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_stdin):
+    def test_back_returns_none(self, scripted_keys):
         """Test that pressing 'b' (back) returns None."""
-        # Mock terminal settings
-        mock_tcgetattr.return_value = []
+        scripted_keys(["b"])
 
-        # Simulate user pressing 'b' to go back
-        mock_stdin.read = MagicMock(side_effect=["b"])
-        mock_stdin.fileno = MagicMock(return_value=0)
+        assert show_processing_config(LOCKED, {"target_size_kb": 400}) is None
 
-        locked_images = [Path("/tmp/img1.jpg")]
-        config = {"target_size_kb": 400}
+    def test_a_bare_escape_cancels(self, scripted_keys):
+        """A lone ESC used to block here until the user pressed another key."""
+        scripted_keys(["\x1b", "z"])
 
-        result = show_processing_config(locked_images, config)
+        assert show_processing_config(LOCKED, {"target_size_kb": 400}) is None
 
-        # Verify None is returned on back
-        assert result is None
-
-    @patch("sys.stdin")
-    @patch("termios.tcgetattr")
-    @patch("termios.tcsetattr")
-    @patch("tty.setraw")
-    def test_uses_config_target_size(self, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_stdin):
+    def test_uses_config_target_size(self, scripted_keys):
         """Test that target_size_kb from config is used correctly."""
-        # Mock terminal settings
-        mock_tcgetattr.return_value = []
+        scripted_keys(["y"])
 
-        # Simulate user pressing Enter to confirm
-        mock_stdin.read = MagicMock(side_effect=["y"])
-        mock_stdin.fileno = MagicMock(return_value=0)
+        result = show_processing_config(LOCKED, {"target_size_kb": 600})
 
-        locked_images = [Path("/tmp/img1.jpg")]
-        custom_size = 600
-        config = {"target_size_kb": custom_size}
+        assert result["target_size_kb"] == 600
 
-        result = show_processing_config(locked_images, config)
-
-        # Verify custom target size is included
-        assert result["target_size_kb"] == custom_size
-
-    @patch("sys.stdin")
-    @patch("termios.tcgetattr")
-    @patch("termios.tcsetattr")
-    @patch("tty.setraw")
-    def test_toggle_options(self, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_stdin):
+    def test_toggle_options(self, scripted_keys):
         """Test that spacebar toggles options correctly."""
-        # Mock terminal settings
-        mock_tcgetattr.return_value = []
+        scripted_keys([" ", "y"])
 
-        # Simulate: Space (toggle resize), Enter (confirm)
-        mock_stdin.read = MagicMock(side_effect=[" ", "y"])
-        mock_stdin.fileno = MagicMock(return_value=0)
+        result = show_processing_config(LOCKED, {"target_size_kb": 400})
 
-        locked_images = [Path("/tmp/img1.jpg")]
-        config = {"target_size_kb": 400}
-
-        result = show_processing_config(locked_images, config)
-
-        # Verify resize was toggled to False (default is True)
+        # Resize (the first option) toggled off; the rest untouched.
         assert result["resize"] is False
-        # preserve_exif should still be True (not toggled)
         assert result["preserve_exif"] is True
+
+    def test_arrow_keys_move_between_options(self, scripted_keys):
+        """Down, down, space: the output format cycles, not a checkbox."""
+        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, " ", "y"])
+
+        result = show_processing_config(LOCKED, {"target_size_kb": 400})
+
+        assert result["output_format"] == "PNG"
+        assert result["resize"] is True
+        assert result["preserve_exif"] is True
+
+    def test_navigation_is_bounded_at_the_top(self, scripted_keys):
+        """Up from the first option stays on the first option."""
+        scripted_keys([*UP_ARROW, " ", "y"])
+
+        result = show_processing_config(LOCKED, {"target_size_kb": 400})
+
+        assert result["resize"] is False
+
+    def test_navigation_is_bounded_at_the_bottom(self, scripted_keys):
+        """Down past the last option stays on the last option."""
+        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, *DOWN_ARROW, " ", "y"])
+
+        result = show_processing_config(LOCKED, {"target_size_kb": 400})
+
+        assert result["output_format"] == "PNG"

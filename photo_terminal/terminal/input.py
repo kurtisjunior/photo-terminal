@@ -1,4 +1,12 @@
-"""Utilities for reading keyboard input in raw mode."""
+"""Reading keyboard input in raw mode.
+
+The one reader every screen uses. It is here, inside the terminal package,
+because decoding a keypress means reading the same descriptor the session put
+into raw mode - and because getting ESC disambiguation right is worth doing
+exactly once. A bare ESC is indistinguishable from the start of an arrow-key
+sequence until a short timeout expires with nothing behind it, which is the
+distinction the screens that hand-rolled ``sys.stdin.read(1)`` never made.
+"""
 
 from __future__ import annotations
 
@@ -112,12 +120,6 @@ def read_key_with_timeout_or_signal(
         return None
 
     return read_key(timeout_sec)
-
-
-def is_ghostty() -> bool:
-    term_program = os.environ.get("TERM_PROGRAM", "")
-    term = os.environ.get("TERM", "")
-    return term_program == "ghostty" or "ghostty" in term
 
 
 def _stdin_has_data(timeout_sec: float) -> bool:

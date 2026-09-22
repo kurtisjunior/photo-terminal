@@ -193,7 +193,15 @@ Configuration:
             return 1
 
         print()
-        result = reorder_images_interactive(selected_images)
+        try:
+            result = reorder_images_interactive(selected_images)
+        except KeyboardInterrupt:
+            # The reorder screen used to swallow Ctrl-C and report itself
+            # cancelled. All three full-screen UIs now propagate it, and the
+            # caller decides what it means - here, the same exit the other
+            # stages take.
+            print("\nCancelled by user")
+            return 1
 
         if result is None:
             print("\nReordering cancelled")

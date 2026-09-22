@@ -13,26 +13,25 @@ in-process renderer everywhere.
 import functools
 import os
 import sys
-import termios
 import threading
-import tty
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from photo_terminal.input_utils import (
-    KEY_DOWN,
-    KEY_ESC,
-    KEY_UP,
-    read_key_with_timeout_or_signal,
-)
 from photo_terminal.reorder import (
     ImageReorderer,
     generate_prefixed_filenames,
     get_final_filenames_preview,
 )
 from photo_terminal.terminal.capabilities import GraphicsProtocol, detect_graphics_protocol
+from photo_terminal.terminal.input import (
+    KEY_DOWN,
+    KEY_ESC,
+    KEY_UP,
+    read_key_with_timeout_or_signal,
+)
 from photo_terminal.terminal.preview.halfblock import render_image_to_ansi
+from photo_terminal.terminal.session import TerminalSession
 
 
 class ReorderImageSelector:
@@ -241,70 +240,52 @@ class ReorderImageSelector:
             List of (original_path, prefixed_filename) tuples if confirmed,
             None if cancelled
         """
-        # Save terminal settings
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-
         try:
-            # Set raw mode
-            tty.setraw(fd)
-
-            # Hide cursor
-            sys.stdout.write("\033[?25l")
-            sys.stdout.flush()
-
-            # Initial render
-            self.render()
-
-            while True:
-                key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._notify_r])
-
-                if key is None:
-                    if self._preview_dirty:
-                        try:
-                            os.read(self._notify_r, 1024)
-                        except OSError:
-                            pass
-                        self._preview_dirty = False
-                        self.render()
-                    continue
-
-                if key == KEY_UP:
-                    self.reorderer.move_up()
-                elif key == KEY_DOWN:
-                    self.reorderer.move_down()
-                elif key == KEY_ESC:
-                    return None
-
-                # Handle regular keys
-                elif key in ("j", "J"):
-                    self.reorderer.move_down()
-                elif key in ("k", "K"):
-                    self.reorderer.move_up()
-                elif key == " ":  # Space = grab/drop
-                    self.reorderer.toggle_grab()
-                elif key in ("r", "R"):  # Reset
-                    self.reorderer.reset()
-                elif key in ("\r", "\n"):  # Enter = confirm
-                    ordered_images = self.reorderer.get_ordered_images()
-                    return generate_prefixed_filenames(ordered_images)
-                elif key in ("q", "Q"):  # Quit
-                    return None
-                elif key == "\x03":  # Ctrl+C
-                    raise KeyboardInterrupt
-
-                # Redraw
+            with TerminalSession():
+                # Initial render
                 self.render()
 
-        except KeyboardInterrupt:
-            return None
+                while True:
+                    key = read_key_with_timeout_or_signal(0.05, extra_fds=[self._notify_r])
+
+                    if key is None:
+                        if self._preview_dirty:
+                            try:
+                                os.read(self._notify_r, 1024)
+                            except OSError:
+                                pass
+                            self._preview_dirty = False
+                            self.render()
+                        continue
+
+                    if key == KEY_UP:
+                        self.reorderer.move_up()
+                    elif key == KEY_DOWN:
+                        self.reorderer.move_down()
+                    elif key == KEY_ESC:
+                        return None
+
+                    # Handle regular keys
+                    elif key in ("j", "J"):
+                        self.reorderer.move_down()
+                    elif key in ("k", "K"):
+                        self.reorderer.move_up()
+                    elif key == " ":  # Space = grab/drop
+                        self.reorderer.toggle_grab()
+                    elif key in ("r", "R"):  # Reset
+                        self.reorderer.reset()
+                    elif key in ("\r", "\n"):  # Enter = confirm
+                        ordered_images = self.reorderer.get_ordered_images()
+                        return generate_prefixed_filenames(ordered_images)
+                    elif key in ("q", "Q"):  # Quit
+                        return None
+                    elif key == "\x03":  # Ctrl+C
+                        raise KeyboardInterrupt
+
+                    # Redraw
+                    self.render()
 
         finally:
-            # Restore terminal
-            sys.stdout.write("\033[?25h")  # Show cursor
-            sys.stdout.write("\033[2J\033[H")  # Clear screen
-            sys.stdout.flush()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             try:
                 self._preview_executor.shutdown(wait=False, cancel_futures=True)
             except Exception:

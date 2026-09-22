@@ -579,12 +579,13 @@ photo-terminal/
 │   ├── scanner.py           # Image format validation
 │   ├── tui.py               # Two-pane image selector with multi-stage workflow
 │   ├── reorder_ui.py        # Interactive reorder screen
-│   ├── input_utils.py       # Keyboard input utilities
-│   ├── terminal/            # The only package that writes to stdout
+│   ├── terminal/            # The only package that touches stdin and stdout
 │   │   ├── capabilities.py  # GraphicsProtocol detection
 │   │   ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
 │   │   ├── layout.py        # The two-pane split, computed in one place
 │   │   ├── frame.py         # Buffered painter: one write, one flush
+│   │   ├── session.py       # Raw mode, alternate screen, cursor: one teardown
+│   │   ├── input.py         # Key decoding, shared by every screen
 │   │   └── preview/         # Kitty emitter, half-block renderer, cache + workers
 │   ├── s3_browser.py        # Interactive S3 folder browser
 │   ├── confirmation.py      # Upload confirmation prompt
