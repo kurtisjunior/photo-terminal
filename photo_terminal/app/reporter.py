@@ -1,4 +1,4 @@
-"""The console :class:`~photo_terminal.progress.ProgressReporter`.
+"""The console :class:`~photo_terminal.domain.progress.ProgressReporter`.
 
 This is the one place that knows a step is drawn as a spinner and a line is
 erased with ``\\033[2K``. The spinner frames moved here from ``uploader.py``,

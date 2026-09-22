@@ -53,7 +53,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 1. **Create YAML configuration system with auto-initialization and CLI override support**
    - Establish configuration foundation (bucket, profile, target_size defaults) before CLI parsing
-   - Auto-create ~/.photo-uploader.yaml on first run with sensible defaults
+   - Auto-create ./photo-uploader.yaml in the working directory on first run, with sensible defaults
 
 2. **Build CLI framework with argparse supporting config overrides and dry-run mode**
    - Support folder path input, --prefix, --target-size, --dry-run flags
@@ -133,6 +133,26 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ## Design Decisions
 
+### Package Architecture
+
+Six bounded contexts with a one-line dependency rule, enforced in CI by
+`import-linter` rather than described in a comment:
+
+```text
+app        -> everything            composition: argv, the pipeline, the wiring
+terminal   -> domain                the only package that touches stdin/stdout
+reporting  -> imaging, domain       the dry-run report and completion summary
+imaging    -> domain                Pillow only
+storage    -> domain                boto3 only, behind a port
+domain     -> nothing               pure: models, errors, ports, rules
+```
+
+A run is `app/pipeline.py`: twelve named steps over a typed
+`PipelineContext`, each taking its collaborators as a value so it can be tested
+on its own. Library code raises typed errors carrying an exit code and reports
+progress through a `ProgressReporter` port; deciding what a failure looks like
+and what the process exits with happens once, in the pipeline.
+
 ### Image Formats
 Standard web formats only (JPEG, PNG, WEBP, TIFF, BMP, GIF). No RAW support.
 
@@ -154,7 +174,7 @@ Basic fields only (camera, date taken, GPS). Leave date empty if missing from or
 Enabled; shows selected files with original → processed size comparison. No actual upload or S3 operations performed.
 
 ### Logging Output
-Minimal: spinner with count during upload, completion summary with filenames. No verbose mode or debug logging.
+Minimal: spinner with count during upload, completion summary with filenames. No verbose mode. Diagnostic logging is off unless `PHOTO_TERMINAL_DEBUG` is set, and goes to a file rather than the screen.
 
 ### CDN Integration
 None; the tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
@@ -173,7 +193,7 @@ Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, 
 Preserve original filenames. No sanitization, timestamps, or renaming options.
 
 ### Configuration
-YAML file (~/.photo-uploader.yaml) auto-created with defaults. CLI args override config values.
+YAML file (`./photo-uploader.yaml`, in the working directory) auto-created with defaults. CLI args override config values.
 
 ### Temp Processing
 Python tempfile.TemporaryDirectory for processed images. Automatic cleanup on success. Persistence on failure enables retry without reprocessing.

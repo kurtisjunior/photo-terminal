@@ -492,13 +492,14 @@ too, and the dev tooling lives behind the `dev` extra:
 # Run all tests (zero skips tolerated, as in CI)
 nix develop -c uv run --extra dev pytest -q --no-skips
 
-# Run specific test file
-nix develop -c uv run --extra dev pytest tests/test_photo_upload.py -v
+# Run one package's tests
+nix develop -c uv run --extra dev pytest tests/terminal -v
 
-# Lint, format and type checks
+# Lint, format, type and dependency checks
 nix develop -c uv run --extra dev ruff check .
 nix develop -c uv run --extra dev ruff format --check .
 nix develop -c uv run --extra dev mypy photo_terminal
+nix develop -c uv run --extra dev lint-imports
 ```
 
 ## Environment Variables
@@ -568,42 +569,82 @@ photo-terminal/
 ├── AGENT.md                  # Development agent guide
 ├── SPEC.md                   # Project specification
 ├── LICENSE                   # MIT License
-├── pyproject.toml            # Package configuration
+├── pyproject.toml            # Package config, lint/type/test/import-linter rules
 ├── requirements.txt          # Python dependencies
 ├── .env.example               # Template for AWS credentials (copy to .env)
 ├── photo-uploader.yaml.example # Template for app configuration
+├── scripts/                  # Standalone helpers, not part of the package
+│   ├── check_dimensions.py
+│   └── debug_optimizer.py
 ├── photo_terminal/           # Source code package
-│   ├── __init__.py
-│   ├── __main__.py          # CLI entry point
-│   ├── config.py            # YAML configuration management
-│   ├── scanner.py           # Image format validation
-│   ├── terminal/            # The only package that touches stdin and stdout
-│   │   ├── capabilities.py  # GraphicsProtocol detection
-│   │   ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
-│   │   ├── layout.py        # The two-pane split, computed in one place
-│   │   ├── frame.py         # Buffered painter: one write, one flush
-│   │   ├── session.py       # Raw mode, alternate screen, cursor: one teardown
-│   │   ├── input.py         # Key decoding, shared by every screen
-│   │   ├── background.py    # One worker pool and wakeup pipe for every screen
-│   │   ├── preview/         # Kitty emitter, half-block renderer, cache + workers
-│   │   └── screens/         # Every full-screen UI, on the shared machinery
-│   │       ├── widgets.py   # ListView: bounded navigation and a scroll window
-│   │       ├── preview_pane.py     # One preview at a time, cleanly replaced
-│   │       ├── select.py           # Stage 1: pick the images
-│   │       ├── reorder.py          # Stage 2: put them in upload order
-│   │       ├── processing_config.py # Stage 3: resize, EXIF, output format
-│   │       └── s3_browse.py        # Stage 4: pick the destination prefix
-│   ├── s3_browser.py        # S3 access, listing, and the browser's wiring
-│   ├── confirmation.py      # Upload confirmation prompt
-│   ├── optimizer.py         # Multi-format image optimization
-│   ├── processor.py         # Batch processing pipeline
-│   ├── duplicate_checker.py # S3 duplicate detection
-│   ├── uploader.py          # S3 upload with progress
-│   ├── dry_run.py           # Dry-run mode
-│   └── summary.py           # Completion summary display
-└── tests/                   # Test suite
-    └── test_*.py            # Test files
+│   ├── __main__.py          # argv -> app.run(), and nothing else
+│   ├── app/                 # Composition: the only layer that imports every other
+│   │   ├── cli.py           # Argument parsing, the banner, the exit code
+│   │   ├── pipeline.py      # The run, as twelve named and testable steps
+│   │   ├── context.py       # The state those steps thread, and their collaborators
+│   │   ├── wiring.py        # Which concrete thing fills each of those holes
+│   │   ├── config.py        # YAML configuration loading
+│   │   └── reporter.py      # The console progress reporter
+│   ├── domain/              # Pure: imports no other package, and nothing does I/O
+│   │   ├── models.py        # Config, ProcessingOptions, S3Destination, ProcessedImage
+│   │   ├── errors.py        # The typed error hierarchy, each with an exit code
+│   │   ├── progress.py      # The ProgressReporter port
+│   │   ├── naming.py        # The S3 key scheme
+│   │   ├── reorder.py       # Grab-and-drop reordering rules
+│   │   └── confirmation.py  # The confirmation text
+│   ├── imaging/             # Pillow only, no terminal and no AWS
+│   │   ├── scanner.py       # Image format validation
+│   │   ├── optimizer.py     # Multi-format image optimization
+│   │   └── processor.py     # Batch processing into a temp directory
+│   ├── storage/             # AWS only; nothing outside this package imports boto3
+│   │   ├── ports.py         # What the layers above need from storage
+│   │   ├── s3.py            # Credentials and prefix listing
+│   │   ├── duplicates.py    # Duplicate detection before upload
+│   │   └── uploader.py      # S3 upload, reporting through the progress port
+│   ├── reporting/           # Reports the user reads once the UI is done
+│   │   ├── dry_run.py       # Dry-run measurements and their rendering
+│   │   └── summary.py       # Completion summary
+│   └── terminal/            # The only package that touches stdin and stdout
+│       ├── capabilities.py  # GraphicsProtocol detection
+│       ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
+│       ├── layout.py        # The two-pane split, computed in one place
+│       ├── frame.py         # Buffered painter: one write, one flush
+│       ├── session.py       # Raw mode, alternate screen, cursor: one teardown
+│       ├── input.py         # Key decoding, shared by every screen
+│       ├── background.py    # One worker pool and wakeup pipe for every screen
+│       ├── preview/         # Kitty emitter, half-block renderer, cache + workers
+│       └── screens/         # Every full-screen UI, on the shared machinery
+│           ├── widgets.py   # ListView: bounded navigation and a scroll window
+│           ├── preview_pane.py     # One preview at a time, cleanly replaced
+│           ├── select.py           # Stage 1: pick the images
+│           ├── reorder.py          # Stage 2: put them in upload order
+│           ├── processing_config.py # Stage 3: resize, EXIF, output format
+│           ├── s3_browse.py        # Stage 4: pick the destination prefix
+│           ├── confirm.py          # The upload confirmation prompt
+│           └── prompt.py           # Line-mode yes/no questions
+└── tests/                   # Mirrors the packages above
+    ├── conftest.py          # Image fixtures, FakeTerminal, RecordingReporter
+    └── app/ domain/ imaging/ storage/ reporting/ terminal/
 ```
+
+### The dependency rule
+
+```text
+app        -> everything
+terminal   -> domain          reporting -> imaging, domain
+imaging    -> domain          storage   -> domain
+domain     -> nothing
+```
+
+It is checked in CI rather than described in a comment:
+
+```bash
+nix develop -c uv run --extra dev lint-imports
+```
+
+Four contracts hold it up. The layering above, plus `domain` importing no
+sibling package at all, `boto3` appearing nowhere outside `storage`, and
+`rich`/`termios`/`tty` appearing nowhere outside `terminal`.
 
 ### Running Tests
 
@@ -612,11 +653,11 @@ photo-terminal/
 nix develop -c uv run --extra dev pytest -v
 
 # Run specific module tests
-nix develop -c uv run --extra dev pytest tests/test_summary.py -v
+nix develop -c uv run --extra dev pytest tests/reporting/test_summary.py -v
 
-# Run integration tests
+# Run one pipeline step's tests
 nix develop -c uv run --extra dev pytest \
-    tests/test_photo_upload.py::test_full_workflow_success -v
+    tests/app/test_pipeline.py -k upload -v
 ```
 
 ## Design Philosophy

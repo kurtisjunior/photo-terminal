@@ -7,7 +7,7 @@ drifted - its own executor, its own cache, its own pipe, its own geometry
 constants, half-blocks on every terminal, and no scroll window.
 
 The ordering itself stays in the domain, in
-:class:`~photo_terminal.reorder.ImageReorderer`: moving a *grabbed* item swaps
+:class:`~photo_terminal.domain.reorder.ImageReorderer`: moving a *grabbed* item swaps
 it with its neighbour, which is a rule about the order rather than about the
 screen. The screen reads the cursor back from it each frame.
 """
@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from photo_terminal.reorder import (
+from photo_terminal.domain.reorder import (
     ImageReorderer,
     generate_prefixed_filenames,
     get_final_filenames_preview,

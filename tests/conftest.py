@@ -366,7 +366,7 @@ class _ByteStream:
 
 @dataclass
 class RecordingReporter:
-    """A :class:`~photo_terminal.progress.ProgressReporter` that remembers.
+    """A :class:`~photo_terminal.domain.progress.ProgressReporter` that remembers.
 
     The suite used to reach for ``capsys`` to find out whether a library
     function had told the user anything, which meant asserting on punctuation

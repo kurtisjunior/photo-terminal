@@ -58,23 +58,16 @@ ignore = ["E501"]
 python_version = "3.12"
 warn_unused_configs = true
 
-# Strict where the design's typed seams live - PreviewFrame, GraphicsProtocol,
-# Layout, CellMetrics - and permissive over the modules that predate it, so new
-# code is held to the standard without a four-thousand-line annotation backlog
-# blocking the branch. Phases 3-6 widen this list as each package moves.
+# The list started at `terminal.*` in phase 2, when strictness had to be scoped
+# to new code so a four-thousand-line annotation backlog would not block the
+# branch, and widened as each package moved. With phase 6 there is nothing left
+# outside a bounded context, so it covers everything.
 #
 # `strict = true` is spelled out here rather than used as a single key: in a
 # per-module section mypy applies several of the flags it implies globally, so
-# the shorthand would have enforced strictness over the whole package.
+# the shorthand would enforce strictness over third-party code as well.
 [[tool.mypy.overrides]]
-module = [
-    "photo_terminal.terminal.*",
-    # Phase 5's new seams: the progress port, the typed errors, and the
-    # concrete reporter the CLI hands to library code.
-    "photo_terminal.app.*",
-    "photo_terminal.errors",
-    "photo_terminal.progress",
-]
+module = ["photo_terminal.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_calls = true
@@ -90,6 +83,62 @@ extra_checks = true
 [[tool.mypy.overrides]]
 module = ["boto3.*", "botocore.*", "yaml.*"]
 ignore_missing_imports = true
+
+# The dependency rule, enforced rather than described. `app` composes
+# everything; `terminal` and `reporting` are siblings that must not know about
+# each other; `imaging` and `storage` likewise; `domain` imports none of them.
+# Running this in CI is what stops the next `reorder_ui` importing from `tui`.
+[tool.importlinter]
+root_package = "photo_terminal"
+# The last two contracts name third-party packages, so the graph has to
+# include them.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "photo_terminal.app",
+    "photo_terminal.terminal : photo_terminal.reporting",
+    "photo_terminal.imaging : photo_terminal.storage",
+    "photo_terminal.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "The domain depends on nothing"
+type = "forbidden"
+source_modules = ["photo_terminal.domain"]
+forbidden_modules = [
+    "photo_terminal.app",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.storage",
+    "photo_terminal.terminal",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only the terminal package touches the terminal"
+type = "forbidden"
+source_modules = [
+    "photo_terminal.domain",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.storage",
+]
+forbidden_modules = ["rich", "termios", "tty"]
+
+# `app` is absent from the sources here on purpose: it composes `storage`, so
+# it reaches boto3 transitively and always will. Every other package must not.
+[[tool.importlinter.contracts]]
+name = "Only the storage package touches AWS"
+type = "forbidden"
+source_modules = [
+    "photo_terminal.domain",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.terminal",
+]
+forbidden_modules = ["boto3", "botocore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

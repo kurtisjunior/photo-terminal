@@ -12,7 +12,7 @@ question it was asked - ``True`` or ``False`` - and the caller decides.
 
 from pathlib import Path
 
-from photo_terminal.confirmation import build_confirmation_prompt, build_confirmation_summary
+from photo_terminal.domain.confirmation import build_confirmation_prompt, build_confirmation_summary
 
 __all__ = ["confirm_upload"]
 

@@ -19,6 +19,45 @@ A terminal-based image upload manager with two-pane TUI interface for interactiv
 **AWS Profile**: kurtis-site
 **Target Bucket**: two-touch
 
+## Architecture
+
+Six bounded contexts, with a dependency rule checked in CI:
+
+```text
+app        -> everything            composition: argv, the pipeline, the wiring
+terminal   -> domain                the only package that touches stdin/stdout
+reporting  -> imaging, domain       the dry-run report and completion summary
+imaging    -> domain                Pillow only
+storage    -> domain                boto3 only, behind a port
+domain     -> nothing               pure: models, errors, ports, rules
+```
+
+Before changing an import, know which layer you are in. `nix develop -c uv run
+--extra dev lint-imports` will tell you if you got it wrong, and so will CI.
+
+A run is `app/pipeline.py`: twelve named steps over a typed `PipelineContext`.
+Add a stage by writing a step and putting it in `PIPELINE`, not by adding a
+branch to `main()`. Steps take their collaborators from `Deps`, so a test gives
+a step the two or three it uses rather than patching module globals.
+
+Library code raises the typed errors in `domain/errors.py` and reports progress
+through the `ProgressReporter` port in `domain/progress.py`. Nothing outside
+`app/` and `terminal/` prints, and nothing outside `app/` decides an exit code.
+
+## Checks
+
+Everything runs inside the pinned devShell, which is what CI runs too:
+
+```bash
+nix develop -c uv run --extra dev ruff check .
+nix develop -c uv run --extra dev ruff format --check .
+nix develop -c uv run --extra dev mypy photo_terminal
+nix develop -c uv run --extra dev lint-imports
+nix develop -c uv run --extra dev pytest -q --no-skips
+```
+
+`mypy` is strict over the whole package and a skipped test fails the build.
+
 ## Core Requirements
 
 ### Hard Requirements
@@ -71,7 +110,8 @@ Follow the 12-step implementation order in SPEC.md:
 ### Minimal Output
 - Spinner + count during upload
 - Completion summary with filenames
-- No verbose mode or debug logging
+- No verbose mode; diagnostics only behind `PHOTO_TERMINAL_DEBUG`, to a file
+- Progress goes through the `ProgressReporter` port, never a bare `print`
 
 ### No Over-Engineering
 - Manual selection only (no batch shortcuts)
@@ -114,7 +154,7 @@ Follow the 12-step implementation order in SPEC.md:
 
 ## Configuration
 
-### Default Config (~/.photo-uploader.yaml)
+### Default Config (`./photo-uploader.yaml`, in the working directory)
 ```yaml
 bucket: two-touch
 aws_profile: kurtis-site
@@ -148,8 +188,11 @@ When problems are found:
 ## Key Files to Understand
 
 - `SPEC.md` - Complete project specification
-- `README.md` - User documentation and usage guide
-- Config location: `~/.photo-uploader.yaml`
+- `README.md` - User documentation, and the project structure in full
+- `photo_terminal/app/pipeline.py` - The run, start to finish, in one file
+- `photo_terminal/domain/` - The vocabulary every other package speaks in
+- `pyproject.toml` - The lint, type, test and dependency rules
+- Config location: `./photo-uploader.yaml`, read from the working directory
 - Temp directory: `tempfile.TemporaryDirectory`
 - S3 bucket structure: `japan/`, `italy/trapani/`, etc.
 - Debug log: `/tmp/photo_terminal_debug.log` (when PHOTO_TERMINAL_DEBUG=1)

@@ -1,10 +1,11 @@
 """Choose the upload destination by walking the bucket's prefixes.
 
-The screen knows nothing about S3. It is handed a :class:`FolderLister` - a
-port with a single method - and asks it what is under a prefix. That is what
-keeps the terminal package free of the AWS SDK, and it is what makes the screen
-testable: the tests drive ``run()`` against a fake lister, which was impossible
-while the browser built its own client.
+The screen knows nothing about S3. It is handed a
+:class:`~photo_terminal.storage.ports.FolderLister` - a port with a single
+method and no boto3 behind it - and asks it what is under a prefix. That is
+what keeps the terminal package free of the AWS SDK, and it is what makes the
+screen testable: the tests drive ``run()`` against a fake lister, which was
+impossible while the browser built its own client.
 
 Listings also come off the keystroke loop. ``handle_selection`` used to make a
 blocking bucket-listing call from inside raw mode, so a slow network froze the
@@ -17,7 +18,6 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future
-from typing import Protocol
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -25,6 +25,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from photo_terminal.storage.ports import FolderLister
 from photo_terminal.terminal.background import BackgroundWorker
 from photo_terminal.terminal.input import KEY_DOWN, KEY_ESC, KEY_UP, read_key_with_timeout_or_signal
 from photo_terminal.terminal.layout import FOOTER_HEIGHT, sample_terminal_size
@@ -39,14 +40,6 @@ GO_UP = ".."
 #: Rows the panel spends on its border, breadcrumb and controls, so the folder
 #: list is windowed into what is left rather than running off the bottom.
 PANEL_CHROME = 8
-
-
-class FolderLister(Protocol):
-    """What the browser needs from storage, and nothing more."""
-
-    def list_folders(self, prefix: str) -> list[str]:
-        """The folder names directly under ``prefix``, sorted."""
-        ...
 
 
 class S3FolderBrowser:

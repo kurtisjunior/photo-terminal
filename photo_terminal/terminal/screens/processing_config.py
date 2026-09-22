@@ -8,41 +8,50 @@ positioning to control, which is exactly the case Rich is good at.
 It reads keys through the shared reader like every other screen. It used to
 call ``sys.stdin.read(1)`` and parse escape sequences itself, with no ESC
 timeout, so a bare Escape blocked until the next keypress.
+
+The answer is a :class:`~photo_terminal.domain.models.ProcessingOptions`. It
+used to be a ``dict[str, Any]`` that four call sites indexed by string literal,
+which is a type too - just one nothing could check.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from photo_terminal.domain.models import OUTPUT_FORMATS, ProcessingOptions
 from photo_terminal.terminal.input import KEY_DOWN, KEY_ESC, KEY_UP, read_key
 from photo_terminal.terminal.session import TerminalSession
 
+__all__ = ["show_processing_config"]
+
 
 def show_processing_config(
-    locked_images: list[Path], config: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Show processing configuration screen for locked images.
+    locked_images: list[Path], default_target_size_kb: int
+) -> ProcessingOptions | None:
+    """Show the processing configuration screen for the locked images.
 
     Args:
-        locked_images: List of selected image paths
-        config: Configuration dict from photo-uploader.yaml
+        locked_images: The image paths the user selected on stage 2.
+        default_target_size_kb: The configured target size, shown against the
+            resize option and carried into the answer.
 
     Returns:
-        Processing configuration dict with user's choices
+        The chosen options, or ``None`` if the user went back or cancelled.
+
+    Raises:
+        KeyboardInterrupt: If the user pressed Ctrl-C.
     """
     console = Console()
 
-    # Available output formats
-    AVAILABLE_FORMATS = ["JPEG", "PNG", "WEBP"]
+    AVAILABLE_FORMATS = list(OUTPUT_FORMATS)
 
     # Configuration options with defaults
-    options: dict[str, Any] = {
+    options: dict[str, bool | str] = {
         "resize": True,  # Apply size optimization
         "preserve_exif": True,  # Preserve EXIF data
         "output_format": "JPEG",  # Output format (cycles through AVAILABLE_FORMATS)
@@ -77,14 +86,14 @@ def show_processing_config(
             table.add_row(
                 Text("►", style="bold cyan"),
                 Text("Resize images", style="bold cyan"),
-                Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB", style="cyan"),
+                Text(f"Optimize to ~{default_target_size_kb}KB", style="cyan"),
                 Text(resize_checkbox, style="bold cyan"),
             )
         else:
             table.add_row(
                 Text(""),
                 Text("Resize images"),
-                Text(f"Optimize to ~{config.get('target_size_kb', 400)}KB"),
+                Text(f"Optimize to ~{default_target_size_kb}KB"),
                 Text(resize_checkbox),
             )
 
@@ -106,7 +115,7 @@ def show_processing_config(
             )
 
         # Output format option
-        format_value = options["output_format"]
+        format_value = str(options["output_format"])
         format_desc = {
             "JPEG": "Lossy compression, smallest size",
             "PNG": "Lossless, larger size",
@@ -161,7 +170,7 @@ def show_processing_config(
                 option_key = option_keys[current_option]
                 if option_key == "output_format":
                     # Cycle through available formats
-                    current_format = options["output_format"]
+                    current_format = str(options["output_format"])
                     current_index = AVAILABLE_FORMATS.index(current_format)
                     next_index = (current_index + 1) % len(AVAILABLE_FORMATS)
                     options["output_format"] = AVAILABLE_FORMATS[next_index]
@@ -170,14 +179,12 @@ def show_processing_config(
                     options[option_key] = not options[option_key]
 
             elif char == "y" or char == "Y":  # Y - confirm
-                # Build result dictionary
-                result = {
-                    "resize": options["resize"],
-                    "target_size_kb": config.get("target_size_kb", 400),
-                    "preserve_exif": options["preserve_exif"],
-                    "output_format": options["output_format"],
-                }
-                return result
+                return ProcessingOptions(
+                    resize=bool(options["resize"]),
+                    target_size_kb=default_target_size_kb,
+                    preserve_exif=bool(options["preserve_exif"]),
+                    output_format=str(options["output_format"]),
+                )
 
             elif char == "b" or char == "B":  # Go back
                 return None

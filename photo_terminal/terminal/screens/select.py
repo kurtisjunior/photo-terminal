@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from photo_terminal.errors import NoImagesFound
+from photo_terminal.domain.errors import NoImagesFound
 from photo_terminal.terminal.capabilities import detect_graphics_protocol
 from photo_terminal.terminal.frame import CLEAR_AND_HOME, HOME, Frame
 from photo_terminal.terminal.input import (
