@@ -17,8 +17,7 @@
             python312
             uv
             awscli2
-            ruff
-            mypy
+            viu
           ];
         };
       }
