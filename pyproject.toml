@@ -8,21 +8,18 @@ version = "1.0.0"
 description = "Terminal-based image upload manager with inline preview for S3"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+# The nix devShell has always pinned python312. The 3.8 floor claimed support
+# that was never built or tested against.
+requires-python = ">=3.12"
 dependencies = [
     "PyYAML",
     "Pillow",
     "boto3",
     "rich",
-    "readchar",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
@@ -30,4 +27,121 @@ classifiers = [
 photo-upload = "photo_terminal.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "import-linter",
+]
+
+[tool.setuptools.packages.find]
+include = ["photo_terminal*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+]
+# The formatter owns line length; E501 would only duplicate it and fire on
+# strings and URLs that cannot be wrapped.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+
+# The list started at `terminal.*` in phase 2, when strictness had to be scoped
+# to new code so a four-thousand-line annotation backlog would not block the
+# branch, and widened as each package moved. With phase 6 there is nothing left
+# outside a bounded context, so it covers everything.
+#
+# `strict = true` is spelled out here rather than used as a single key: in a
+# per-module section mypy applies several of the flags it implies globally, so
+# the shorthand would enforce strictness over third-party code as well.
+[[tool.mypy.overrides]]
+module = ["photo_terminal.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+implicit_reexport = false
+warn_return_any = true
+warn_unused_ignores = true
+strict_equality = true
+extra_checks = true
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*", "yaml.*"]
+ignore_missing_imports = true
+
+# The dependency rule, enforced rather than described. `app` composes
+# everything; `terminal` and `reporting` are siblings that must not know about
+# each other; `imaging` and `storage` likewise; `domain` imports none of them.
+# Running this in CI is what stops the next `reorder_ui` importing from `tui`.
+[tool.importlinter]
+root_package = "photo_terminal"
+# The last two contracts name third-party packages, so the graph has to
+# include them.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "photo_terminal.app",
+    "photo_terminal.terminal : photo_terminal.reporting",
+    "photo_terminal.imaging : photo_terminal.storage",
+    "photo_terminal.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "The domain depends on nothing"
+type = "forbidden"
+source_modules = ["photo_terminal.domain"]
+forbidden_modules = [
+    "photo_terminal.app",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.storage",
+    "photo_terminal.terminal",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only the terminal package touches the terminal"
+type = "forbidden"
+source_modules = [
+    "photo_terminal.domain",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.storage",
+]
+forbidden_modules = ["rich", "termios", "tty"]
+
+# `app` is absent from the sources here on purpose: it composes `storage`, so
+# it reaches boto3 transitively and always will. Every other package must not.
+[[tool.importlinter.contracts]]
+name = "Only the storage package touches AWS"
+type = "forbidden"
+source_modules = [
+    "photo_terminal.domain",
+    "photo_terminal.imaging",
+    "photo_terminal.reporting",
+    "photo_terminal.terminal",
+]
+forbidden_modules = ["boto3", "botocore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+# An xfail that starts passing is a failure until the marker comes off.
+xfail_strict = true

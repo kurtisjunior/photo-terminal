@@ -13,7 +13,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 ### Included Features
 
 - Multi-stage workflow with selection locking (Stage 1: select, Stage 2: configure, Stage 3: browse)
-- Two-pane TUI with file list (left) and viu preview (right) for image selection
+- Two-pane TUI with file list (left) and in-process image preview (right) for image selection
 - Asynchronous preview rendering with loading indicator on cache misses
 - Processing configuration screen (resize, EXIF preservation, output format)
 - Output format selection (JPEG, PNG, WEBP) with format-specific optimization
@@ -35,16 +35,16 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 - Database integration
 - Web interface or API
 - Batch selection shortcuts (manual curation only)
-- Graceful degradation without viu (hard requirement)
+- iTerm2 inline-image and Sixel emitters (both terminals get the half-block preview)
 
 ## Assumptions
 
 - User has AWS CLI configured with profile (kurtis-site) and credentials
-- Terminal supports 256+ colors and viu is installed (hard requirement) - [viu](https://github.com/atanunq/viu)
+- Terminal supports 256+ colors. Previews are rendered in-process: the [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) on Kitty, Ghostty and WezTerm, ANSI half-blocks everywhere else. No external binary is required.
 - Source images are in standard web formats only: JPEG, PNG, WEBP, TIFF, BMP, GIF
 - Target S3 bucket (two-touch) exists with location-based folder structure (japan/, italy/, etc.)
 - AWS permissions configured for ListBucket and PutObject operations
-- Python 3.8+ with Pillow, boto3, and TUI libraries available
+- Python 3.12+ with Pillow, boto3, and TUI libraries available
 - Sufficient local disk space in temp directory for batch processing
 - Primary use case is personal photography workflow (speed, UX, reliability prioritized)
 - User's website handles generation of size variants (_medium, _small, _thumb) and WEBP conversion
@@ -53,7 +53,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 1. **Create YAML configuration system with auto-initialization and CLI override support**
    - Establish configuration foundation (bucket, profile, target_size defaults) before CLI parsing
-   - Auto-create ~/.photo-uploader.yaml on first run with sensible defaults
+   - Auto-create ./photo-uploader.yaml in the working directory on first run, with sensible defaults
 
 2. **Build CLI framework with argparse supporting config overrides and dry-run mode**
    - Support folder path input, --prefix, --target-size, --dry-run flags
@@ -64,7 +64,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
    - Fail-fast on empty folders
    - Only show valid, processable images to user
 
-4. **Build two-pane TUI with file list (left) and viu preview (right)**
+4. **Build two-pane TUI with file list (left) and image preview (right)**
    - Core UX requirement: navigable list with checkboxes, live preview on right
    - Preview rendering is asynchronous with a loading indicator on cache misses
    - Arrow keys navigate, spacebar toggles selection, enter confirms
@@ -104,11 +104,11 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ## Risks and Mitigations
 
-### viu not installed or terminal incompatibility
-**Mitigation**: Check for viu availability on startup with clear error message and installation instructions. No fallback since visual preview is core requirement.
+### Terminal does not support a graphics protocol
+**Mitigation**: Detect the protocol from the environment and render half-blocks when there is no Kitty support, including inside tmux and screen. Both paths are in-process, so there is nothing to install and nothing to fail at startup. A preview box under 20 columns or 10 rows is suppressed with a message rather than drawn as a few unreadable cells.
 
 ### Large high-resolution images may cause slow preview rendering
-**Mitigation**: viu handles scaling automatically. Preview rendering is asynchronous with a loading indicator, so navigation remains responsive and the preview updates when ready.
+**Mitigation**: Pillow resizes the source to exactly the placement rectangle, which is a whole number of terminal cells, so the terminal has nothing left to scale. Preview rendering is asynchronous with a loading indicator, so navigation remains responsive and the preview updates when ready.
 
 ### Reorder interface preview lag
 **Mitigation**: Reorder previews use the same asynchronous rendering path with a loading indicator to keep navigation responsive.
@@ -133,6 +133,26 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ## Design Decisions
 
+### Package Architecture
+
+Six bounded contexts with a one-line dependency rule, enforced in CI by
+`import-linter` rather than described in a comment:
+
+```text
+app        -> everything            composition: argv, the pipeline, the wiring
+terminal   -> domain                the only package that touches stdin/stdout
+reporting  -> imaging, domain       the dry-run report and completion summary
+imaging    -> domain                Pillow only
+storage    -> domain                boto3 only, behind a port
+domain     -> nothing               pure: models, errors, ports, rules
+```
+
+A run is `app/pipeline.py`: twelve named steps over a typed
+`PipelineContext`, each taking its collaborators as a value so it can be tested
+on its own. Library code raises typed errors carrying an exit code and reports
+progress through a `ProgressReporter` port; deciding what a failure looks like
+and what the process exits with happens once, in the pipeline.
+
 ### Image Formats
 Standard web formats only (JPEG, PNG, WEBP, TIFF, BMP, GIF). No RAW support.
 
@@ -154,7 +174,7 @@ Basic fields only (camera, date taken, GPS). Leave date empty if missing from or
 Enabled; shows selected files with original → processed size comparison. No actual upload or S3 operations performed.
 
 ### Logging Output
-Minimal: spinner with count during upload, completion summary with filenames. No verbose mode or debug logging.
+Minimal: spinner with count during upload, completion summary with filenames. No verbose mode. Diagnostic logging is off unless `PHOTO_TERMINAL_DEBUG` is set, and goes to a file rather than the screen.
 
 ### CDN Integration
 None; the tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
@@ -173,13 +193,13 @@ Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, 
 Preserve original filenames. No sanitization, timestamps, or renaming options.
 
 ### Configuration
-YAML file (~/.photo-uploader.yaml) auto-created with defaults. CLI args override config values.
+YAML file (`./photo-uploader.yaml`, in the working directory) auto-created with defaults. CLI args override config values.
 
 ### Temp Processing
 Python tempfile.TemporaryDirectory for processed images. Automatic cleanup on success. Persistence on failure enables retry without reprocessing.
 
 ### Dependencies
-viu is hard requirement (no fallback mode). Pillow for processing, boto3 for S3, rich for TUI, PyYAML for config.
+No external binaries. Pillow for processing and preview rendering, boto3 for S3, rich for the non-interactive reports, PyYAML for config. Previews are emitted from Python: the Kitty graphics protocol on Kitty/Ghostty/WezTerm, ANSI half-blocks elsewhere.
 
 ### Output Formats
 User selects output format in Stage 2 (Processing Configuration):

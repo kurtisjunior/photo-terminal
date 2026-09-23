@@ -21,15 +21,30 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ### System Requirements
 
-- **Python 3.8+**
+- **Python 3.12+** (the pinned `nix develop` shell provides it)
 - **AWS credentials** — a `.env` file with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (recommended) or an AWS CLI profile
 - Terminal supporting 256+ colors
 
+### Terminals and previews
+
+Previews are rendered in-process. There is no external image viewer to install.
+
+| Terminal | Preview | How |
+|---|---|---|
+| Ghostty, Kitty, WezTerm | Photographic | Native [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) placement, emitted from Python |
+| iTerm2, Sixel terminals, Terminal.app, xterm | ANSI half-blocks | Pillow, 24-bit colour, two pixels per row |
+| Inside tmux or screen | ANSI half-blocks | A multiplexer will not pass a graphics placement through |
+
+The preview is aspect-correct, never upscaled past the source's own resolution,
+and bounded to the right-hand pane at every terminal size. Below 20 columns or
+10 rows of usable pane it is replaced by a short message.
+
 ### Python Dependencies
 
-- Pillow (image processing)
+- Pillow (image processing and preview rendering)
 - boto3 (AWS S3)
 - PyYAML (configuration)
+- rich (completion summary and dry-run report)
 
 ## Installation
 
@@ -470,17 +485,21 @@ Image mode is preserved when possible (RGB, RGBA, grayscale).
 
 ## Testing
 
-Run the test suite:
+Everything runs inside the pinned `nix develop` shell, which is what CI uses
+too, and the dev tooling lives behind the `dev` extra:
 
 ```bash
-# Run all tests
-pytest
+# Run all tests (zero skips tolerated, as in CI)
+nix develop -c uv run --extra dev pytest -q --no-skips
 
-# Run specific test file
-pytest tests/test_photo_upload.py -v
+# Run one package's tests
+nix develop -c uv run --extra dev pytest tests/terminal -v
 
-# Run with coverage
-pytest --cov=photo_terminal --cov-report=html
+# Lint, format, type and dependency checks
+nix develop -c uv run --extra dev ruff check .
+nix develop -c uv run --extra dev ruff format --check .
+nix develop -c uv run --extra dev mypy photo_terminal
+nix develop -c uv run --extra dev lint-imports
 ```
 
 ## Environment Variables
@@ -550,43 +569,95 @@ photo-terminal/
 ├── AGENT.md                  # Development agent guide
 ├── SPEC.md                   # Project specification
 ├── LICENSE                   # MIT License
-├── pyproject.toml            # Package configuration
+├── pyproject.toml            # Package config, lint/type/test/import-linter rules
 ├── requirements.txt          # Python dependencies
 ├── .env.example               # Template for AWS credentials (copy to .env)
 ├── photo-uploader.yaml.example # Template for app configuration
+├── scripts/                  # Standalone helpers, not part of the package
+│   ├── check_dimensions.py
+│   └── debug_optimizer.py
 ├── photo_terminal/           # Source code package
-│   ├── __init__.py
-│   ├── __main__.py          # CLI entry point
-│   ├── config.py            # YAML configuration management
-│   ├── scanner.py           # Image format validation
-│   ├── tui.py               # Two-pane image selector with multi-stage workflow
-│   ├── input_utils.py       # Keyboard input utilities
-│   ├── s3_browser.py        # Interactive S3 folder browser
-│   ├── confirmation.py      # Upload confirmation prompt
-│   ├── optimizer.py         # Multi-format image optimization
-│   ├── processor.py         # Batch processing pipeline
-│   ├── duplicate_checker.py # S3 duplicate detection
-│   ├── uploader.py          # S3 upload with progress
-│   ├── dry_run.py           # Dry-run mode
-│   └── summary.py           # Completion summary display
-└── tests/                   # Test suite
-    └── test_*.py            # Test files
+│   ├── __main__.py          # argv -> app.run(), and nothing else
+│   ├── app/                 # Composition: the only layer that imports every other
+│   │   ├── cli.py           # Argument parsing, the banner, the exit code
+│   │   ├── pipeline.py      # The run, as twelve named and testable steps
+│   │   ├── context.py       # The state those steps thread, and their collaborators
+│   │   ├── wiring.py        # Which concrete thing fills each of those holes
+│   │   ├── config.py        # YAML configuration loading
+│   │   └── reporter.py      # The console progress reporter
+│   ├── domain/              # Pure: imports no other package, and nothing does I/O
+│   │   ├── models.py        # Config, ProcessingOptions, S3Destination, ProcessedImage
+│   │   ├── errors.py        # The typed error hierarchy, each with an exit code
+│   │   ├── progress.py      # The ProgressReporter port
+│   │   ├── naming.py        # The S3 key scheme
+│   │   ├── reorder.py       # Grab-and-drop reordering rules
+│   │   └── confirmation.py  # The confirmation text
+│   ├── imaging/             # Pillow only, no terminal and no AWS
+│   │   ├── scanner.py       # Image format validation
+│   │   ├── optimizer.py     # Multi-format image optimization
+│   │   └── processor.py     # Batch processing into a temp directory
+│   ├── storage/             # AWS only; nothing outside this package imports boto3
+│   │   ├── ports.py         # What the layers above need from storage
+│   │   ├── s3.py            # Credentials and prefix listing
+│   │   ├── duplicates.py    # Duplicate detection before upload
+│   │   └── uploader.py      # S3 upload, reporting through the progress port
+│   ├── reporting/           # Reports the user reads once the UI is done
+│   │   ├── dry_run.py       # Dry-run measurements and their rendering
+│   │   └── summary.py       # Completion summary
+│   └── terminal/            # The only package that touches stdin and stdout
+│       ├── capabilities.py  # GraphicsProtocol detection
+│       ├── geometry.py      # Size/Point/Rect, cell measurement, fit()
+│       ├── layout.py        # The two-pane split, computed in one place
+│       ├── frame.py         # Buffered painter: one write, one flush
+│       ├── session.py       # Raw mode, alternate screen, cursor: one teardown
+│       ├── input.py         # Key decoding, shared by every screen
+│       ├── background.py    # One worker pool and wakeup pipe for every screen
+│       ├── preview/         # Kitty emitter, half-block renderer, cache + workers
+│       └── screens/         # Every full-screen UI, on the shared machinery
+│           ├── widgets.py   # ListView: bounded navigation and a scroll window
+│           ├── preview_pane.py     # One preview at a time, cleanly replaced
+│           ├── select.py           # Stage 1: pick the images
+│           ├── reorder.py          # Stage 2: put them in upload order
+│           ├── processing_config.py # Stage 3: resize, EXIF, output format
+│           ├── s3_browse.py        # Stage 4: pick the destination prefix
+│           ├── confirm.py          # The upload confirmation prompt
+│           └── prompt.py           # Line-mode yes/no questions
+└── tests/                   # Mirrors the packages above
+    ├── conftest.py          # Image fixtures, FakeTerminal, RecordingReporter
+    └── app/ domain/ imaging/ storage/ reporting/ terminal/
 ```
+
+### The dependency rule
+
+```text
+app        -> everything
+terminal   -> domain          reporting -> imaging, domain
+imaging    -> domain          storage   -> domain
+domain     -> nothing
+```
+
+It is checked in CI rather than described in a comment:
+
+```bash
+nix develop -c uv run --extra dev lint-imports
+```
+
+Four contracts hold it up. The layering above, plus `domain` importing no
+sibling package at all, `boto3` appearing nowhere outside `storage`, and
+`rich`/`termios`/`tty` appearing nowhere outside `terminal`.
 
 ### Running Tests
 
 ```bash
 # Run all tests with verbose output
-pytest -v
+nix develop -c uv run --extra dev pytest -v
 
 # Run specific module tests
-pytest tests/test_summary.py -v
+nix develop -c uv run --extra dev pytest tests/reporting/test_summary.py -v
 
-# Run integration tests
-pytest tests/test_photo_upload.py::test_full_workflow_success -v
-
-# Run with coverage
-pytest --cov=photo_terminal --cov-report=html
+# Run one pipeline step's tests
+nix develop -c uv run --extra dev pytest \
+    tests/app/test_pipeline.py -k upload -v
 ```
 
 ## Design Philosophy

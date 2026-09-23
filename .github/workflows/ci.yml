@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Everything runs inside the pinned devShell, so CI and a developer's
+      # machine are running the same toolchain.
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache uv downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      - name: Lint
+        run: nix develop -c uv run --extra dev ruff check .
+
+      - name: Format
+        run: nix develop -c uv run --extra dev ruff format --check .
+
+      - name: Types
+        run: nix develop -c uv run --extra dev mypy photo_terminal
+
+      # The dependency rule, enforced rather than described: app on top,
+      # domain at the bottom, boto3 only inside storage, rich and termios
+      # only inside terminal.
+      - name: Imports
+        run: nix develop -c uv run --extra dev lint-imports
+
+      # Zero skips tolerated: a skipped test is one that silently stopped
+      # testing anything, which is how three optimizer tests pointed at an
+      # absolute path from one machine for as long as they existed.
+      - name: Tests
+        run: nix develop -c uv run --extra dev pytest -q --no-skips
