@@ -10,8 +10,8 @@ Usage:
 Example:
     photo-upload ./images --prefix japan/tokyo --target-size 500 --dry-run
 
-This module is argv in, exit code out, and nothing else. It used to be 398
-lines, 283 of them a single ``main()``; what it did now lives in
+This module is argv in, exit code out, and nothing else. It used to be 373
+lines, 285 of them a single ``main()``; what it did now lives in
 :mod:`photo_terminal.app.cli` and :mod:`photo_terminal.app.pipeline`.
 """
 
