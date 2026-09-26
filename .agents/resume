@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This project has no wake-time services or authentication to restore. Setup
+# persists the Nix environment through the login shell and installs .venv.
+exit 0

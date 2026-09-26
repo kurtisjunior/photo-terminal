@@ -69,3 +69,6 @@ uv.lock
 
 # Riptide artifacts (cloud-synced)
 .humanlayer/
+
+# Amp runtime state
+.amp/portals/*

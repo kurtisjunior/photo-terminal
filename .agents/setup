@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+step() {
+  local label="$1"
+  shift
+  printf '\n==> %s\n' "$label"
+  time "$@"
+}
+
+load_nix() {
+  if [[ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+    # shellcheck disable=SC1091
+    source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  elif [[ -e "$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+  fi
+}
+
+# A non-login setup shell does not inherit Nix's profile even when a stale
+# snapshot already contains it. Load that profile before deciding to install.
+load_nix
+if ! command -v nix >/dev/null 2>&1; then
+  step "Installing Nix" \
+    bash -c "curl --proto '=https' --tlsv1.2 -sSfL https://install.determinate.systems/nix | sh -s -- install --no-confirm"
+  # The installer cannot update this running process.
+  load_nix
+fi
+
+if ! command -v nix >/dev/null 2>&1; then
+  printf 'Nix installation completed but nix is not available in this shell.\n' >&2
+  exit 1
+fi
+nix_bin="$(command -v nix)"
+nix_bin_dir="$(dirname "$nix_bin")"
+
+profile_marker="# photo-terminal Nix development shell"
+profile_end_marker="# end photo-terminal Nix development shell"
+if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  if grep -Fqx "$profile_end_marker" "$HOME/.bash_profile"; then
+    sed -i "\|^$profile_marker$|,\|^$profile_end_marker$|d" "$HOME/.bash_profile"
+  else
+    # Upgrade the original three-line hook written before it had an end marker.
+    sed -i "\|^$profile_marker$|,+3d" "$HOME/.bash_profile"
+  fi
+fi
+cat >>"$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ -z "\${IN_NIX_SHELL:-}" && "\${PWD}" == "$repo_root" ]]; then
+  if [[ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+    source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  elif [[ -e "\$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+    source "\$HOME/.nix-profile/etc/profile.d/nix.sh"
+  fi
+  eval "\$($nix_bin print-dev-env '$repo_root')"
+  export PATH="$nix_bin_dir:\$PATH"
+fi
+$profile_end_marker
+EOF
+
+step "Installing locked Python dependencies" \
+  nix develop "$repo_root" -c bash -c \
+  'uv sync --extra dev --frozen --python "$(command -v python)"'
+
+printf '\nOrb setup complete.\n'
