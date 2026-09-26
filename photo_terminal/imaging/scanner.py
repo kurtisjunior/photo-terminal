@@ -1,6 +1,6 @@
-"""Folder scanner with image format validation.
+"""Image source scanner with format validation.
 
-Scans a folder for valid image files and validates formats using Pillow.
+Scans a file or folder for valid image files and validates formats using Pillow.
 Supports JPEG, PNG, WEBP, TIFF, BMP, GIF. No RAW format support.
 """
 
@@ -47,18 +47,26 @@ def is_valid_image(file_path: Path) -> bool:
 
 
 def scan_folder(folder_path: str) -> list[Path]:
-    """Scan folder for valid image files.
+    """Scan a file or folder for valid image files.
 
     Args:
-        folder_path: Path to folder to scan
+        folder_path: Path to an image or a folder to scan
 
     Returns:
         List of Path objects for valid image files, sorted by name
 
     Raises:
-        NoImagesFound: If folder is empty or contains no valid images
+        NoImagesFound: If the path does not contain a valid image
     """
     path = Path(folder_path).resolve()
+
+    if path.is_file():
+        if is_valid_image(path):
+            return [path]
+        raise NoImagesFound(
+            f"Not a valid image: {folder_path}\n"
+            f"Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}"
+        )
 
     # Get all files in folder (non-recursive, exclude hidden files)
     all_files = [f for f in path.iterdir() if f.is_file() and not f.name.startswith(".")]

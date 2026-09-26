@@ -49,11 +49,11 @@ class ConfigError(PhotoTerminalError):
 
 
 class InvalidSourceFolder(PhotoTerminalError):
-    """The path given on the command line is not a folder we can read."""
+    """The source path given on the command line does not exist."""
 
 
 class NoImagesFound(PhotoTerminalError):
-    """The source folder holds no image this tool can process."""
+    """The source path holds no image this tool can process."""
 
 
 class S3AccessError(PhotoTerminalError):

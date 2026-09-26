@@ -97,6 +97,21 @@ class TestIsValidImage:
 class TestScanFolder:
     """Tests for scan_folder function."""
 
+    def test_scan_single_image(self, tmp_path):
+        image = tmp_path / "only.jpg"
+        Image.new("RGB", (100, 100)).save(image, "JPEG")
+
+        assert scan_folder(str(image)) == [image]
+
+    def test_scan_single_non_image(self, tmp_path):
+        source = tmp_path / "notes.txt"
+        source.write_text("not an image")
+
+        with pytest.raises(NoImagesFound) as exc_info:
+            scan_folder(str(source))
+
+        assert "Not a valid image" in exc_info.value.message
+
     def test_scan_with_valid_images(self, tmp_path):
         """Test scanning folder with valid images."""
         # Create test images

@@ -22,13 +22,13 @@ from photo_terminal.domain.errors import InvalidSourceFolder, PhotoTerminalError
 from photo_terminal.domain.models import Config
 from photo_terminal.domain.progress import ProgressReporter
 
-__all__ = ["build_parser", "render_effective_config", "resolve_folder", "run"]
+__all__ = ["build_parser", "render_effective_config", "resolve_source", "run"]
 
 _EPILOG = """
 Examples:
-  %(prog)s ./images --prefix japan/tokyo
-  %(prog)s ./photos --prefix italy/trapani --target-size 500
-  %(prog)s ./vacation --prefix spain/barcelona --dry-run
+  %(prog)s ./photo.jpg japan/tokyo
+  %(prog)s ./photos italy/trapani
+  %(prog)s ./vacation spain/barcelona --dry-run
 
 Configuration:
   Edit photo-uploader.yaml to change default settings.
@@ -39,16 +39,23 @@ _DEBUG_LOG = "/tmp/photo_terminal_debug.log"
 
 
 def build_parser(default_target_size_kb: int) -> argparse.ArgumentParser:
-    """The CLI surface. Unchanged from before the refactor, on purpose."""
+    """Build the small command-line surface."""
     parser = argparse.ArgumentParser(
-        prog="photo-upload",
+        prog="pt",
         description="Upload and optimize photos to S3 with inline preview",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EPILOG,
     )
-    parser.add_argument("folder_path", help="Path to folder containing images")
+    parser.add_argument("source_path", help="Image file or folder to upload")
     parser.add_argument(
-        "--prefix", help='S3 prefix/folder path (e.g., "japan/tokyo")', default=None
+        "destination",
+        nargs="?",
+        help='S3 folder path (e.g. "japan/tokyo"); omit to browse',
+    )
+    parser.add_argument(
+        "--prefix",
+        help=argparse.SUPPRESS,
+        default=None,
     )
     parser.add_argument(
         "--target-size",
@@ -60,26 +67,22 @@ def build_parser(default_target_size_kb: int) -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_folder(folder_path: str) -> Path:
-    """Resolve and validate the source folder.
+def resolve_source(source_path: str) -> Path:
+    """Resolve and validate the source file or folder.
 
     Args:
-        folder_path: The path as it was typed.
+        source_path: The path as it was typed.
 
     Returns:
         The resolved path.
 
     Raises:
-        InvalidSourceFolder: If it does not exist or is not a directory. This
-            used to be a ``SystemExit`` raised from a helper, which made "bad
-            argument" indistinguishable from every other exit in ``main()``.
+        InvalidSourceFolder: If it does not exist.
     """
-    path = Path(folder_path).resolve()
+    path = Path(source_path).expanduser().resolve()
 
     if not path.exists():
-        raise InvalidSourceFolder(f"Folder does not exist: {folder_path}")
-    if not path.is_dir():
-        raise InvalidSourceFolder(f"Path is not a directory: {folder_path}")
+        raise InvalidSourceFolder(f"Source path does not exist: {source_path}")
 
     return path
 
@@ -91,7 +94,7 @@ def render_effective_config(cfg: Config, options: CliOptions) -> str:
         "=" * 50,
         "",
         "Configuration:",
-        f"  Source folder:  {options.folder}",
+        f"  Source:         {options.source}",
         f"  S3 bucket:      {cfg.bucket}",
         f"  S3 prefix:      {options.prefix if options.prefix else '(root)'}",
         f"  AWS profile:    {cfg.aws_profile or '(env vars)'}",
@@ -146,14 +149,18 @@ def run(argv: list[str] | None = None, reporter: ProgressReporter | None = None)
 
     args = build_parser(cfg.target_size_kb).parse_args(argv)
 
+    if args.destination is not None and args.prefix is not None:
+        report.warn("Error: Give the S3 folder once, as the second argument")
+        return 2
+
     try:
-        folder = resolve_folder(args.folder_path)
+        source = resolve_source(args.source_path)
     except PhotoTerminalError as e:
         return report_failure(report, e)
 
     options = CliOptions(
-        folder=folder,
-        prefix=args.prefix,
+        source=source,
+        prefix=args.destination if args.destination is not None else args.prefix,
         target_size_kb=args.target_size,
         dry_run=args.dry_run,
     )

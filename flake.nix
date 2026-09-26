@@ -13,12 +13,20 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          packages = with pkgs; [
             python312
             uv
             awscli2
             viu
           ];
+
+          shellHook = ''
+            export UV_PROJECT_ENVIRONMENT="$PWD/.venv"
+            export UV_NO_MANAGED_PYTHON=1
+            uv sync --extra dev --frozen --python ${pkgs.python312}/bin/python --quiet
+            export VIRTUAL_ENV="$UV_PROJECT_ENVIRONMENT"
+            export PATH="$VIRTUAL_ENV/bin:$PATH"
+          '';
         };
       }
     );

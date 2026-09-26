@@ -69,8 +69,8 @@ Step = Callable[[PipelineContext, Deps], Outcome]
 
 
 def scan(ctx: PipelineContext, deps: Deps) -> Outcome:
-    """Find every image in the source folder."""
-    ctx.candidates = deps.scan_folder(str(ctx.options.folder))
+    """Find every image in the source path."""
+    ctx.candidates = deps.scan_folder(str(ctx.options.source))
     deps.reporter.info(f"Found {len(ctx.candidates)} valid image(s)\n")
     return Outcome.CONTINUE
 
@@ -131,7 +131,7 @@ def configure_processing(ctx: PipelineContext, deps: Deps) -> Outcome:
 
 
 def choose_destination(ctx: PipelineContext, deps: Deps) -> Outcome:
-    """Stage 4: pick the bucket prefix, or take the one ``--prefix`` gave."""
+    """Stage 4: pick the bucket prefix, or take the CLI destination."""
     if ctx.options.prefix is None:
         deps.reporter.info("\nSelect S3 upload folder:\n")
 

@@ -35,41 +35,38 @@ def executed():
         yield mock
 
 
-# -- resolve_folder ------------------------------------------------------- #
+# -- resolve_source ------------------------------------------------------- #
 
 
-def test_resolve_folder_accepts_a_directory(tmp_path):
-    assert cli.resolve_folder(str(tmp_path)) == tmp_path.resolve()
+def test_resolve_source_accepts_a_directory(tmp_path):
+    assert cli.resolve_source(str(tmp_path)) == tmp_path.resolve()
 
 
-def test_resolve_folder_rejects_a_missing_path():
+def test_resolve_source_accepts_a_file(tmp_path):
+    target = tmp_path / "photo.jpg"
+    target.touch()
+
+    assert cli.resolve_source(str(target)) == target.resolve()
+
+
+def test_resolve_source_rejects_a_missing_path():
     with pytest.raises(InvalidSourceFolder) as excinfo:
-        cli.resolve_folder("/nonexistent/folder")
+        cli.resolve_source("/nonexistent/photo.jpg")
 
-    assert "Folder does not exist" in excinfo.value.message
+    assert "Source path does not exist" in excinfo.value.message
     assert excinfo.value.exit_code == 1
-
-
-def test_resolve_folder_rejects_a_file(tmp_path):
-    target = tmp_path / "test.txt"
-    target.write_text("not a folder")
-
-    with pytest.raises(InvalidSourceFolder) as excinfo:
-        cli.resolve_folder(str(target))
-
-    assert "Path is not a directory" in excinfo.value.message
 
 
 # -- the parser ----------------------------------------------------------- #
 
 
-def test_the_flags_are_unchanged():
+def test_the_destination_is_the_second_argument():
     args = cli.build_parser(400).parse_args(
-        ["./images", "--prefix", "japan/tokyo", "--target-size", "500", "--dry-run"]
+        ["./images", "japan/tokyo", "--target-size", "500", "--dry-run"]
     )
 
-    assert args.folder_path == "./images"
-    assert args.prefix == "japan/tokyo"
+    assert args.source_path == "./images"
+    assert args.destination == "japan/tokyo"
     assert args.target_size == 500
     assert args.dry_run is True
 
@@ -77,6 +74,7 @@ def test_the_flags_are_unchanged():
 def test_the_optional_flags_default_to_nothing():
     args = cli.build_parser(400).parse_args(["./images"])
 
+    assert args.destination is None
     assert args.prefix is None
     assert args.target_size is None
     assert args.dry_run is False
@@ -95,7 +93,7 @@ def test_the_help_shows_the_configured_default_size():
 
 
 def test_the_banner_names_the_target(tmp_path):
-    options = CliOptions(folder=tmp_path, prefix="japan/tokyo", target_size_kb=None, dry_run=False)
+    options = CliOptions(source=tmp_path, prefix="japan/tokyo", target_size_kb=None, dry_run=False)
 
     banner = cli.render_effective_config(CONFIG, options)
 
@@ -108,7 +106,7 @@ def test_the_banner_names_the_target(tmp_path):
 
 
 def test_the_banner_says_root_when_no_prefix_was_given(tmp_path):
-    options = CliOptions(folder=tmp_path, prefix=None, target_size_kb=None, dry_run=False)
+    options = CliOptions(source=tmp_path, prefix=None, target_size_kb=None, dry_run=False)
 
     banner = cli.render_effective_config(CONFIG, options)
 
@@ -117,7 +115,7 @@ def test_the_banner_says_root_when_no_prefix_was_given(tmp_path):
 
 
 def test_the_banner_says_env_vars_when_there_is_no_profile(tmp_path):
-    options = CliOptions(folder=tmp_path, prefix=None, target_size_kb=None, dry_run=False)
+    options = CliOptions(source=tmp_path, prefix=None, target_size_kb=None, dry_run=False)
     config = Config(bucket="b", aws_profile=None, target_size_kb=400)
 
     assert "AWS profile:    (env vars)" in cli.render_effective_config(config, options)
@@ -127,11 +125,11 @@ def test_the_banner_says_env_vars_when_there_is_no_profile(tmp_path):
 
 
 def test_run_hands_the_pipeline_a_validated_context(tmp_path, loaded_config, executed, reporter):
-    assert cli.run([str(tmp_path), "--prefix", "japan/tokyo"], reporter=reporter) == 0
+    assert cli.run([str(tmp_path), "japan/tokyo"], reporter=reporter) == 0
 
     ctx = executed.call_args.args[0]
     assert ctx.options == CliOptions(
-        folder=tmp_path.resolve(), prefix="japan/tokyo", target_size_kb=None, dry_run=False
+        source=tmp_path.resolve(), prefix="japan/tokyo", target_size_kb=None, dry_run=False
     )
     assert ctx.config is CONFIG
 
@@ -155,7 +153,22 @@ def test_an_invalid_folder_never_reaches_the_pipeline(loaded_config, executed, r
     assert cli.run(["/nonexistent/folder"], reporter=reporter) == 1
 
     executed.assert_not_called()
-    assert any("Folder does not exist" in w for w in reporter.warnings)
+    assert any("Source path does not exist" in w for w in reporter.warnings)
+
+
+def test_the_old_prefix_flag_still_works(tmp_path, loaded_config, executed, reporter):
+    assert cli.run([str(tmp_path), "--prefix", "japan/tokyo"], reporter=reporter) == 0
+
+    assert executed.call_args.args[0].options.prefix == "japan/tokyo"
+
+
+def test_destination_cannot_be_given_twice(tmp_path, loaded_config, executed, reporter):
+    assert (
+        cli.run([str(tmp_path), "japan/tokyo", "--prefix", "italy/trapani"], reporter=reporter) == 2
+    )
+
+    executed.assert_not_called()
+    assert reporter.warnings == ["Error: Give the S3 folder once, as the second argument"]
 
 
 def test_a_bad_config_never_reaches_the_parser(tmp_path, executed, reporter):
@@ -178,10 +191,10 @@ def test_main_forwards_argv(tmp_path):
     from photo_terminal.__main__ import main
 
     with patch("photo_terminal.__main__.run", return_value=7) as run:
-        with patch("sys.argv", ["photo-upload", str(tmp_path), "--dry-run"]):
+        with patch("sys.argv", ["pt", str(tmp_path), "test", "--dry-run"]):
             assert main() == 7
 
-    assert run.call_args.args[0] == [str(tmp_path), "--dry-run"]
+    assert run.call_args.args[0] == [str(tmp_path), "test", "--dry-run"]
 
 
 def test_main_is_thin():

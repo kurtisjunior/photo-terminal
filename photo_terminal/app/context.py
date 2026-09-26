@@ -36,7 +36,7 @@ __all__ = ["CliOptions", "Deps", "PipelineContext"]
 class CliOptions:
     """What the user asked for on the command line, already validated."""
 
-    folder: Path
+    source: Path
     prefix: str | None
     target_size_kb: int | None
     dry_run: bool
@@ -53,7 +53,7 @@ class PipelineContext:
     config: Config
     options: CliOptions
 
-    #: Every valid image in the source folder. Filled by ``scan``.
+    #: Every valid image in the source path. Filled by ``scan``.
     candidates: list[Path] = field(default_factory=list)
     #: The images the user chose. Filled by ``select``.
     selection: list[Path] = field(default_factory=list)

@@ -60,7 +60,7 @@ def make_context(
     ctx = PipelineContext(
         config=config if config is not None else CONFIG,
         options=CliOptions(
-            folder=tmp_path,
+            source=tmp_path,
             prefix=prefix,
             target_size_kb=target_size_kb,
             dry_run=dry_run,

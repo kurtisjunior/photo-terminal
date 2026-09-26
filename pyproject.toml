@@ -24,6 +24,7 @@ classifiers = [
 ]
 
 [project.scripts]
+pt = "photo_terminal.__main__:main"
 photo-upload = "photo_terminal.__main__:main"
 
 [project.optional-dependencies]
