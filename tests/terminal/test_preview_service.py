@@ -11,9 +11,11 @@ import os
 import select
 import shutil
 import time
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from photo_terminal.terminal.capabilities import GraphicsProtocol
 from photo_terminal.terminal.geometry import Point, Size
@@ -38,11 +40,17 @@ def half_block_service():
     service.close()
 
 
-def settled(service: PreviewService, path: Path, box: Size = BOX, timeout: float = 5.0):
+def settled(
+    service: PreviewService,
+    path: Path,
+    box: Size = BOX,
+    timeout: float = 5.0,
+    rotation: int = 0,
+):
     """Block until the background render for ``path`` has landed."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        frame = service.frame_for(path, box)
+        frame = service.frame_for(path, box, rotation)
         if frame is not None:
             return frame
         time.sleep(0.005)
@@ -164,6 +172,25 @@ class TestWakeup:
 
 
 class TestFrameSelection:
+    def test_exif_orientation_and_manual_rotation_change_the_preview_pixels(
+        self, kitty_service, tmp_path
+    ):
+        path = tmp_path / "oriented.jpg"
+        image = Image.new("RGB", (800, 400), "navy")
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Stored landscape, displayed 90 degrees clockwise.
+        image.save(path, exif=exif)
+
+        oriented = settled(kitty_service, path)
+        rotated = settled(kitty_service, path, rotation=1)
+
+        assert isinstance(oriented, KittyFrame)
+        assert isinstance(rotated, KittyFrame)
+        with Image.open(BytesIO(oriented.png)) as preview:
+            assert preview.height > preview.width
+        with Image.open(BytesIO(rotated.png)) as preview:
+            assert preview.width > preview.height
+
     def test_the_kitty_protocol_produces_a_placement(self, kitty_service, portrait_3x4):
         frame = settled(kitty_service, portrait_3x4)
 

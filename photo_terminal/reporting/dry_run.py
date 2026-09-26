@@ -74,6 +74,7 @@ def dry_run_upload(
     target_size_kb: int,
     aws_profile: str | None,
     output_format: str = "JPEG",
+    rotations: dict[Path, int] | None = None,
     reporter: ProgressReporter | None = None,
 ) -> DryRunReport:
     """Measure what would be uploaded, without uploading anything.
@@ -88,6 +89,7 @@ def dry_run_upload(
         target_size_kb: Target file size in kilobytes
         aws_profile: AWS CLI profile name (not used in dry-run)
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
+        rotations: Optional clockwise quarter turns keyed by source path.
         reporter: Where per-image processing progress goes.
 
     Returns:
@@ -98,7 +100,7 @@ def dry_run_upload(
     """
     try:
         temp_dir, processed_images = process_images(
-            images, target_size_kb, output_format, reporter=reporter
+            images, target_size_kb, output_format, rotations=rotations, reporter=reporter
         )
     except PhotoTerminalError:
         raise

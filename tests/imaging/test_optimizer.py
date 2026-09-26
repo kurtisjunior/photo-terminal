@@ -371,6 +371,28 @@ class TestTargetSizeConfiguration:
 class TestAspectRatioPreservation:
     """Test that aspect ratio is preserved."""
 
+    def test_exif_orientation_and_manual_rotation_are_applied_to_pixels(self, temp_dir):
+        source = temp_dir / "oriented.jpg"
+        oriented_output = temp_dir / "oriented.png"
+        rotated_output = temp_dir / "rotated.png"
+        image = Image.new("RGB", (800, 400), "navy")
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Stored landscape, displayed 90 degrees clockwise.
+        image.save(source, exif=exif)
+
+        oriented = optimize_image(source, oriented_output, output_format="PNG")
+        rotated = optimize_image(source, rotated_output, output_format="PNG", rotation=1)
+
+        assert oriented["original_dimensions"] == (400, 800)
+        assert rotated["original_dimensions"] == (800, 400)
+        with Image.open(oriented_output) as output:
+            assert output.size == (400, 800)
+        with Image.open(rotated_output) as output:
+            assert output.size == (800, 400)
+        with Image.open(source) as unchanged:
+            assert unchanged.size == (800, 400)
+            assert unchanged.getexif()[0x0112] == 6
+
     def test_dimensions_preserved(self, large_image_with_exif, temp_dir):
         """Test that aspect ratio is preserved after resizing."""
         output_path = temp_dir / "output.jpg"

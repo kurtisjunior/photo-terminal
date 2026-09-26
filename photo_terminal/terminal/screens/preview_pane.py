@@ -12,7 +12,7 @@ Written once, the screens cannot forget it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from photo_terminal.terminal.frame import Frame
@@ -63,7 +63,7 @@ class PreviewPane:
 
     # -- painting --------------------------------------------------------- #
 
-    def paint(self, frame: Frame, box: Rect, path: Path) -> None:
+    def paint(self, frame: Frame, box: Rect, path: Path, rotation: int = 0) -> None:
         """Show ``path`` in ``box``, replacing whatever is there.
 
         Writes nothing when the preview has not changed, which is what keeps
@@ -74,7 +74,7 @@ class PreviewPane:
             self.erase(frame)
             return
 
-        incoming, token = self._incoming(path, box.size)
+        incoming, token = self._incoming(path, box.size, rotation)
         if token == self.token:
             return
 
@@ -116,32 +116,48 @@ class PreviewPane:
 
     # -- warming ---------------------------------------------------------- #
 
-    def preload(self, box: Rect, items: Sequence[Path], cursor: int) -> None:
+    def preload(
+        self,
+        box: Rect,
+        items: Sequence[Path],
+        cursor: int,
+        rotations: Mapping[Path, int] | None = None,
+    ) -> None:
         """Warm the neighbours of ``cursor`` in the background."""
         if box.is_empty:
             return
         for offset in PRELOAD_OFFSETS:
             target = cursor + offset
             if 0 <= target < len(items):
-                self._service.request(items[target], box.size)
+                path = items[target]
+                self._service.request(path, box.size, (rotations or {}).get(path, 0))
 
-    def warm(self, box: Rect, items: Sequence[Path], count: int) -> None:
+    def warm(
+        self,
+        box: Rect,
+        items: Sequence[Path],
+        count: int,
+        rotations: Mapping[Path, int] | None = None,
+    ) -> None:
         """Warm the first ``count`` items, before the first paint."""
         if box.is_empty:
             return
         for path in items[:count]:
-            self._service.request(path, box.size)
+            self._service.request(path, box.size, (rotations or {}).get(path, 0))
 
     # -- internals -------------------------------------------------------- #
 
-    def _incoming(self, path: Path, box: Size) -> tuple[PreviewFrame, tuple[object, ...]]:
+    def _incoming(
+        self, path: Path, box: Size, rotation: int
+    ) -> tuple[PreviewFrame, tuple[object, ...]]:
         """The frame to show for ``path``, and a token identifying it.
 
         The token is what the change detector compares. It has to distinguish a
         placeholder from the real image for the same path and box, because that
         transition is exactly when a repaint is required.
         """
-        frame = self._service.frame_for(path, box)
+        rotation %= 4
+        frame = self._service.frame_for(path, box, rotation)
         if frame is None:
-            return MessageFrame(LOADING_MESSAGE, box.w), (path, box, "loading")
-        return frame, (path, box, "ready")
+            return MessageFrame(LOADING_MESSAGE, box.w), (path, box, rotation, "loading")
+        return frame, (path, box, rotation, "ready")

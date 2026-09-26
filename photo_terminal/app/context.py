@@ -21,6 +21,7 @@ from pathlib import Path
 
 from photo_terminal.domain.models import (
     Config,
+    ImageSelection,
     ProcessedImage,
     ProcessingOptions,
     S3Destination,
@@ -56,6 +57,8 @@ class PipelineContext:
     candidates: list[Path] = field(default_factory=list)
     #: The images the user chose. Filled by ``select``.
     selection: list[Path] = field(default_factory=list)
+    #: Clockwise quarter turns chosen in the selector, keyed by source path.
+    rotations: dict[Path, int] = field(default_factory=dict)
     #: Original path -> upload filename, when the user reordered. ``None``
     #: means the original names and order stand.
     ordering: dict[Path, str] | None = None
@@ -114,7 +117,7 @@ class Deps:
     process_images: Callable[..., tuple[tempfile.TemporaryDirectory[str], list[ProcessedImage]]]
 
     # terminal
-    select_images: Callable[[list[Path]], list[Path]]
+    select_images: Callable[[list[Path]], ImageSelection]
     ask_reorder: Callable[[], bool]
     reorder_images: Callable[[list[Path]], list[tuple[Path, str]] | None]
     show_processing_config: Callable[[list[Path], int], ProcessingOptions | None]

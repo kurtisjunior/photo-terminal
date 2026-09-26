@@ -77,7 +77,9 @@ def scan(ctx: PipelineContext, deps: Deps) -> Outcome:
 
 def select(ctx: PipelineContext, deps: Deps) -> Outcome:
     """Stage 1: let the user choose which of them to upload."""
-    ctx.selection = deps.select_images(ctx.candidates)
+    result = deps.select_images(ctx.candidates)
+    ctx.selection = result.images
+    ctx.rotations = result.rotations
 
     # An empty selection is the user declining, and the screen has already
     # said so. It is not a failure and it is not an exception.
@@ -174,6 +176,7 @@ def dry_run(ctx: PipelineContext, deps: Deps) -> Outcome:
         target_size,
         ctx.config.aws_profile,
         processing.output_format,
+        rotations=ctx.rotations,
         reporter=deps.reporter,
     )
     deps.reporter.info(render_report(ctx.dry_run_report))
@@ -204,6 +207,7 @@ def process(ctx: PipelineContext, deps: Deps) -> Outcome:
         processing.output_format,
         max_dimension=1920,
         filename_map=ctx.ordering,
+        rotations=ctx.rotations,
         reporter=deps.reporter,
     )
     return Outcome.CONTINUE

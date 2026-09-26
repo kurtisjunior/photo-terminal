@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 
 from photo_terminal.domain.errors import NoImagesFound
+from photo_terminal.domain.models import ImageSelection
 from photo_terminal.terminal.capabilities import detect_graphics_protocol
 from photo_terminal.terminal.frame import CLEAR_AND_HOME, HOME, Frame
 from photo_terminal.terminal.input import (
@@ -62,6 +63,7 @@ class ImageSelector:
         self._first_render = True
         self._selections_locked = False  # Track if selections are locked
         self._locked_indices: set[int] = set()  # Store locked selection indices
+        self.rotations: dict[Path, int] = {}
 
         self._protocol = detect_graphics_protocol()
         self._cell = probe_cell_metrics()
@@ -108,6 +110,15 @@ class ImageSelector:
         """
         images = self._view.items
         return [images[i] for i in sorted(self.selected_indices)]
+
+    def rotate_current(self) -> None:
+        """Rotate the highlighted image 90 degrees clockwise, non-destructively."""
+        path = self._view.current
+        turns = (self.rotations.get(path, 0) + 1) % 4
+        if turns:
+            self.rotations[path] = turns
+        else:
+            self.rotations.pop(path, None)
 
     # -- the file list ---------------------------------------------------- #
 
@@ -175,9 +186,9 @@ class ImageSelector:
         return (
             widest_that_fits(
                 [
-                    "↑/↓ Nav  x/y/Space: Mark [x]  a: All  Enter: Lock",
-                    "↑/↓ Nav  Space: Mark  a: All  Enter: Lock",
-                    "↑/↓ Nav  Space: Mark  Enter: Lock",
+                    "↑/↓ Nav  x/y/Space: Mark  r: Rotate  a: All  Enter: Lock",
+                    "↑/↓ Nav  Space: Mark  r: Rotate  Enter: Lock",
+                    "Space: Mark  r: Rotate  Enter: Lock",
                 ],
                 width,
             ),
@@ -204,7 +215,8 @@ class ImageSelector:
             frame.write(HOME)
 
         self._paint_file_list(frame, layout)
-        self._pane.paint(frame, layout.preview_box, self._view.current)
+        current = self._view.current
+        self._pane.paint(frame, layout.preview_box, current, self.rotations.get(current, 0))
         self._pane.paint_notice(frame, layout.footer, layout.preview_suppressed)
 
         # Anything the cache owes the terminal - today, freeing the pixels of an
@@ -213,7 +225,7 @@ class ImageSelector:
         frame.write(self._pane.take_pending_writes())
         frame.flush()
 
-        self._pane.preload(layout.preview_box, self._view.items, self._view.cursor)
+        self._pane.preload(layout.preview_box, self._view.items, self._view.cursor, self.rotations)
 
     def _paint_file_list(self, frame: Frame, layout: Layout) -> None:
         pane = layout.list_pane
@@ -224,11 +236,11 @@ class ImageSelector:
 
     # -- the input loop --------------------------------------------------- #
 
-    def run(self) -> list[Path] | None:
+    def run(self) -> ImageSelection | None:
         """Run the interactive selector.
 
         Returns:
-            List of selected image paths, or None if cancelled
+            Selected image paths and rotations, or None if cancelled
 
         Raises:
             KeyboardInterrupt: If the user presses Ctrl-C
@@ -241,11 +253,11 @@ class ImageSelector:
         finally:
             self._pane.close()
 
-    def _loop(self) -> list[Path] | None:
+    def _loop(self) -> ImageSelection | None:
         """The key loop, inside a terminal the session already owns."""
         # Warm the first screenful before the initial paint
         layout = Layout.for_terminal(self._terminal_size, self._cell)
-        self._pane.warm(layout.preview_box, self._view.items, STARTUP_PRELOAD)
+        self._pane.warm(layout.preview_box, self._view.items, STARTUP_PRELOAD, self.rotations)
 
         # Initial render
         self.render()
@@ -296,12 +308,21 @@ class ImageSelector:
                 # Just mark the image, don't proceed
                 logger.info(f"'{key}' pressed - toggling selection")
                 self.toggle_selection()
+            elif key in ("r", "R"):
+                logger.info("R pressed - rotating current image clockwise")
+                self.rotate_current()
             elif key == "n" or key == "N":
                 if not self._selections_locked:
                     logger.info("'n' pressed but selections not locked - ignoring")
                     continue
                 logger.info("'n' pressed - proceeding to next stage")
-                return self.get_selected_images()
+                selected = self.get_selected_images()
+                return ImageSelection(
+                    images=selected,
+                    rotations={
+                        path: self.rotations[path] for path in selected if path in self.rotations
+                    },
+                )
             elif key == "a" or key == "A":
                 # Toggle select all
                 logger.info("'a' pressed - toggling select all")
@@ -330,14 +351,15 @@ class ImageSelector:
 # --------------------------------------------------------------------------- #
 
 
-def select_images(images: list[Path]) -> list[Path]:
+def select_images(images: list[Path]) -> ImageSelection:
     """Interactive image selection with TUI.
 
     Args:
         images: List of valid image paths from scanner
 
     Returns:
-        The selected image paths, or an empty list if the user chose nothing.
+        The selected image paths and rotations, or an empty selection if the
+        user chose nothing.
         Cancelling is an answer, not a failure: the caller decides what it
         means and which exit code it earns.
 
@@ -359,9 +381,9 @@ def select_images(images: list[Path]) -> list[Path]:
     selected = selector.run()
     logger.info(f"Selector returned {len(selected) if selected else 0} images")
 
-    if not selected:
+    if selected is None or not selected.images:
         logger.info("User cancelled or no images selected")
         print("\nNo images selected")
-        return []
+        return ImageSelection(images=[], rotations={})
 
     return selected

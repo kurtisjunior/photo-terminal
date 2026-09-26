@@ -56,7 +56,12 @@ def test_process_images_success(sample_images, mock_optimize_result):
     """Test successful processing of multiple images."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         # Create a dummy file to simulate optimizer output
         output_path.touch()
@@ -104,7 +109,12 @@ def test_process_images_with_warnings(sample_images):
     }
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_result
@@ -125,7 +135,12 @@ def test_process_images_preserves_original_filenames(sample_images, mock_optimiz
     """Test that original filenames are preserved in temp directory."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -168,7 +183,12 @@ def test_process_images_reports_progress_for_each_image(
     """Progress is reported, not printed - one step per image, in order."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -215,7 +235,12 @@ def test_process_images_custom_target_size(sample_images, mock_optimize_result):
     """Test processing with custom target size."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -237,7 +262,12 @@ def test_process_images_calls_optimizer_with_correct_paths(sample_images, mock_o
     """Test that optimizer is called with correct input and output paths."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -257,6 +287,20 @@ def test_process_images_calls_optimizer_with_correct_paths(sample_images, mock_o
             assert output_path.parent.name.startswith("photo_upload_")
 
         temp_dir.cleanup()
+
+
+def test_process_images_passes_each_images_rotation(sample_images, mock_optimize_result):
+    rotations = {sample_images[0]: 1, sample_images[2]: 3}
+
+    def optimize(input_path, output_path, *args, **kwargs):
+        output_path.touch()
+        return mock_optimize_result
+
+    with patch("photo_terminal.imaging.processor.optimize_image", side_effect=optimize) as mocked:
+        temp_dir, _ = process_images(sample_images, rotations=rotations)
+
+    assert [call.kwargs["rotation"] for call in mocked.call_args_list] == [1, 0, 3]
+    temp_dir.cleanup()
 
 
 # Tests for disk space checking
@@ -406,7 +450,12 @@ def test_process_images_ends_the_progress_run(sample_images, mock_optimize_resul
     """The run is closed off, so the reporter can erase whatever it drew."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -436,7 +485,12 @@ def test_process_images_prints_nothing(sample_images, mock_optimize_result, caps
     """Presentation is the pipeline's; the processor only reports."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result
@@ -455,7 +509,12 @@ def test_process_images_temp_directory_prefix(sample_images, mock_optimize_resul
     """Test that temp directory has correct prefix."""
 
     def mock_optimize_side_effect(
-        input_path, output_path, target_size_kb, output_format="JPEG", max_dimension=1920
+        input_path,
+        output_path,
+        target_size_kb,
+        output_format="JPEG",
+        max_dimension=1920,
+        rotation=0,
     ):
         output_path.touch()
         return mock_optimize_result

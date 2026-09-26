@@ -24,7 +24,7 @@ from photo_terminal.domain.errors import (
     S3AccessError,
     UploadFailed,
 )
-from photo_terminal.domain.models import ProcessingOptions, S3Destination
+from photo_terminal.domain.models import ImageSelection, ProcessingOptions, S3Destination
 
 from .conftest import EMPTY_REPORT, OPTIONS, configured, make_context, make_processed
 
@@ -58,11 +58,21 @@ def test_select_keeps_what_the_screen_returned(tmp_path, deps, reporter):
     assert "Selected 2 image(s)" in "".join(reporter.infos)
 
 
+def test_select_keeps_non_destructive_rotations(tmp_path, deps):
+    image = tmp_path / "a.jpg"
+    result = ImageSelection(images=[image], rotations={image: 1})
+    ctx = make_context(tmp_path, candidates=[image])
+
+    assert pipeline.select(ctx, deps(select_images=lambda images: result)) is Outcome.CONTINUE
+    assert ctx.rotations == {image: 1}
+
+
 def test_select_aborts_on_an_empty_selection(tmp_path, deps):
     """Cancelling is an answer. It is not an exception and not a crash."""
     ctx = make_context(tmp_path, candidates=[tmp_path / "a.jpg"])
 
-    assert pipeline.select(ctx, deps(select_images=lambda images: [])) is Outcome.ABORT
+    empty = ImageSelection(images=[], rotations={})
+    assert pipeline.select(ctx, deps(select_images=lambda images: empty)) is Outcome.ABORT
     assert ctx.selection == []
 
 
@@ -236,7 +246,7 @@ def test_dry_run_reports_and_stops(tmp_path, deps, reporter):
 def test_dry_run_uses_the_configured_size_when_resizing_is_off(tmp_path, deps):
     seen: list[int] = []
 
-    def measure(images, bucket, prefix, target_size, profile, fmt, reporter=None):
+    def measure(images, bucket, prefix, target_size, profile, fmt, rotations=None, reporter=None):
         seen.append(target_size)
         return EMPTY_REPORT
 
@@ -250,6 +260,21 @@ def test_dry_run_uses_the_configured_size_when_resizing_is_off(tmp_path, deps):
     pipeline.dry_run(ctx, deps(dry_run_upload=measure))
 
     assert seen == [200]  # the config's size, not the screen's
+
+
+def test_dry_run_passes_rotations_through(tmp_path, deps):
+    image = tmp_path / "a.jpg"
+    seen: dict[Path, int] | None = None
+
+    def measure(*args, rotations=None, **kwargs):
+        nonlocal seen
+        seen = rotations
+        return EMPTY_REPORT
+
+    ctx = configured(tmp_path, dry_run=True, selection=[image], rotations={image: 1})
+    pipeline.dry_run(ctx, deps(dry_run_upload=measure))
+
+    assert seen == {image: 1}
 
 
 def test_dry_run_never_reaches_the_bucket(tmp_path, deps):
@@ -297,6 +322,22 @@ def test_process_passes_the_reorder_map_through(tmp_path, deps):
     assert seen["images"] == [image]
     assert seen["filename_map"] == {image: "01_a.jpg"}
     assert seen["max_dimension"] == 1920
+
+
+def test_process_passes_rotations_through(tmp_path, deps):
+    image = tmp_path / "a.jpg"
+    seen: dict[str, object] = {}
+
+    def process(images, target, fmt, **kwargs):
+        seen.update(kwargs)
+        import tempfile
+
+        return tempfile.TemporaryDirectory(prefix="t_"), []
+
+    ctx = configured(tmp_path, selection=[image], rotations={image: 3})
+    pipeline.process(ctx, deps(process_images=process))
+
+    assert seen["rotations"] == {image: 3}
 
 
 def test_process_keeps_the_temp_directory_on_the_context(tmp_path, deps):
@@ -401,7 +442,8 @@ def test_a_dry_run_exits_zero_without_uploading(tmp_path, deps):
 def test_cancelling_exits_one(tmp_path, deps):
     ctx = make_context(tmp_path)
 
-    assert pipeline.execute(ctx, deps(select_images=lambda images: [])) == 1
+    empty = ImageSelection(images=[], rotations={})
+    assert pipeline.execute(ctx, deps(select_images=lambda images: empty)) == 1
 
 
 def test_a_typed_failure_exits_with_its_own_code(tmp_path, deps, reporter):

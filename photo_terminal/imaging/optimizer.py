@@ -8,7 +8,7 @@ preserving aspect ratio and basic EXIF data (camera, date, GPS).
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 # Quality iteration steps from highest to minimum acceptable
 QUALITY_STEPS = [95, 90, 85, 80, 75, 70, 65, 60]
@@ -39,6 +39,7 @@ def optimize_image(
     target_size_kb: int = 400,
     output_format: str = "JPEG",
     max_dimension: int = 1920,
+    rotation: int = 0,
 ) -> dict[str, Any]:
     """Optimize image to target file size with EXIF preservation and resizing.
 
@@ -53,6 +54,7 @@ def optimize_image(
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
         max_dimension: Maximum width or height in pixels (default: 1920).
                       Images larger than this will be resized proportionally.
+        rotation: Clockwise quarter turns to apply after EXIF orientation.
 
     Returns:
         Dictionary with optimization results:
@@ -90,8 +92,14 @@ def optimize_image(
     except Exception as e:
         raise ValueError(f"Cannot open image file: {input_path}. Error: {e}") from e
 
-    # Store original format and dimensions for reporting
+    # Finder and other image viewers apply EXIF Orientation before display.
+    # Normalize it into pixels here so preview, processing and upload all agree.
     original_format = img.format or "UNKNOWN"
+    img = ImageOps.exif_transpose(img)
+    for _ in range(rotation % 4):
+        img = img.transpose(Image.Transpose.ROTATE_270)
+
+    # Store the visible dimensions for reporting, after orientation is applied.
     original_dimensions = (img.width, img.height)
 
     # Resize if image exceeds max dimension

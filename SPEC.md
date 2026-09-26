@@ -182,9 +182,10 @@ None; the tool handles upload to S3 only. User's website generates size variants
 ### Selection UI
 Two-pane TUI with checkbox-style indicators and multi-stage workflow:
 1. Mark images with y/Space (shows [x])
-2. Lock selections with Enter (prevents accidental changes)
-3. Proceed with 'n' to processing configuration
-Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, enter locks, 'n' proceeds. Preview rendering is asynchronous with a loading indicator on cache misses to keep navigation responsive.
+2. Rotate the current image 90° clockwise with r when needed
+3. Lock selections with Enter (prevents accidental changes)
+4. Proceed with 'n' to processing configuration
+Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, 'r' rotates non-destructively, enter locks, and 'n' proceeds. Preview rendering applies EXIF Orientation and is asynchronous with a loading indicator on cache misses to keep navigation responsive.
 
 ### Error Handling
 Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, pre-validation before processing starts.

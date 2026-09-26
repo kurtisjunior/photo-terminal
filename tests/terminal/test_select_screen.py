@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from photo_terminal.domain.errors import NoImagesFound
+from photo_terminal.domain.models import ImageSelection
 from photo_terminal.terminal.capabilities import GraphicsProtocol, detect_graphics_protocol
 from photo_terminal.terminal.layout import Layout
 from photo_terminal.terminal.screens.select import ImageSelector, select_images
@@ -181,7 +182,7 @@ class TestSelectImages:
         assert exc_info.value.exit_code == 1
 
     @patch("photo_terminal.terminal.screens.select.ImageSelector")
-    @pytest.mark.parametrize("answer", [None, []])
+    @pytest.mark.parametrize("answer", [None, ImageSelection([], {})])
     def test_select_images_user_cancels(self, mock_selector_class, sample_images, answer):
         """Cancelling answers with an empty selection; the caller decides."""
         mock_selector = MagicMock()
@@ -196,7 +197,7 @@ class TestSelectImages:
         # Mock selector to return selected images
         mock_selector = MagicMock()
         selected_images = [sample_images[0], sample_images[2]]
-        mock_selector.run.return_value = selected_images
+        mock_selector.run.return_value = ImageSelection(selected_images, {})
         mock_selector_class.return_value = mock_selector
 
         result = select_images(sample_images)
@@ -267,6 +268,30 @@ class TestNavigationLogic:
 
 class TestKeyboardSelection:
     """Tests for keyboard selection shortcuts."""
+
+    def test_r_rotates_current_image_and_returns_the_rotation(self, sample_images, scripted_keys):
+        selector = ImageSelector(sample_images)
+
+        scripted_keys(["r", "y", "\r", "n"])
+        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
+            result = selector.run()
+
+        assert result is not None
+        assert result.images == [sample_images[0]]
+        assert result.rotations == {sample_images[0]: 1}
+
+    def test_four_rotations_return_to_the_source_orientation(self, sample_images):
+        selector = ImageSelector(sample_images)
+
+        for _ in range(4):
+            selector.rotate_current()
+
+        assert selector.rotations == {}
+
+    def test_rotation_key_is_shown_in_the_controls(self, sample_images):
+        selector = ImageSelector(sample_images)
+
+        assert "r: Rotate" in selector._hint_lines(80)[0]
 
     def test_y_key_selects_current_and_proceeds(self, sample_images, scripted_keys):
         """Test that pressing 'y' toggles selection of current image (multi-stage workflow)."""

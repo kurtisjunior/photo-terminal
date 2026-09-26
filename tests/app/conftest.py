@@ -15,6 +15,7 @@ import pytest
 from photo_terminal.app.context import CliOptions, Deps, PipelineContext
 from photo_terminal.domain.models import (
     Config,
+    ImageSelection,
     ProcessedImage,
     ProcessingOptions,
     S3Destination,
@@ -96,7 +97,7 @@ class FakeDeps:
             "reporter": self.reporter,
             "scan_folder": lambda folder: [Path(folder) / "a.jpg"],
             "process_images": self._process_images,
-            "select_images": lambda images: list(images),
+            "select_images": lambda images: ImageSelection(list(images), {}),
             "ask_reorder": lambda: False,
             "reorder_images": lambda images: None,
             "show_processing_config": lambda images, size: OPTIONS,

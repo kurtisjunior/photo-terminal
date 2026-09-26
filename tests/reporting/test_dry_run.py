@@ -168,7 +168,9 @@ def test_dry_run_upload_calls_processor(sample_images, sample_processed_images, 
             aws_profile="test-profile",
         )
 
-        mock_process.assert_called_once_with(sample_images, 500, "JPEG", reporter=None)
+        mock_process.assert_called_once_with(
+            sample_images, 500, "JPEG", rotations=None, reporter=None
+        )
 
 
 def test_dry_run_upload_passes_the_reporter_through(

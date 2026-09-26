@@ -30,6 +30,7 @@ def process_images(
     output_format: str = "JPEG",
     max_dimension: int = 1920,
     filename_map: dict[Path, str] | None = None,
+    rotations: dict[Path, int] | None = None,
     reporter: ProgressReporter | None = None,
 ) -> tuple[tempfile.TemporaryDirectory[str], list[ProcessedImage]]:
     """Process multiple images with optimization and save to temp directory.
@@ -49,6 +50,7 @@ def process_images(
         output_format: Output format - 'JPEG', 'PNG', or 'WEBP' (default: 'JPEG')
         max_dimension: Maximum width or height in pixels (default: 1920)
         filename_map: Optional dict mapping original Path to new filename (for reordering)
+        rotations: Optional clockwise quarter turns keyed by source path.
         reporter: Where per-image progress goes. Discarded when omitted.
 
     Returns:
@@ -107,8 +109,14 @@ def process_images(
 
             try:
                 # Optimize image (with resizing if needed)
+                rotation = (rotations or {}).get(image_path, 0)
                 result = optimize_image(
-                    image_path, output_path, target_size_kb, output_format, max_dimension
+                    image_path,
+                    output_path,
+                    target_size_kb,
+                    output_format,
+                    max_dimension,
+                    rotation=rotation,
                 )
 
                 # Create ProcessedImage metadata

@@ -34,7 +34,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from photo_terminal.terminal.background import DEFAULT_WORKERS, BackgroundWorker
 from photo_terminal.terminal.capabilities import GraphicsProtocol
@@ -67,6 +67,7 @@ class PreviewKey:
     path: Path
     protocol: GraphicsProtocol
     cells: Size
+    rotation: int = 0
 
 
 class PreviewService:
@@ -108,13 +109,13 @@ class PreviewService:
 
     # -- the render path's half ------------------------------------------ #
 
-    def frame_for(self, path: Path, box: Size) -> PreviewFrame | None:
+    def frame_for(self, path: Path, box: Size, rotation: int = 0) -> PreviewFrame | None:
         """The cached frame for ``path`` in a ``box``-sized box.
 
         Returns ``None`` when the render has been scheduled but has not landed
         yet, which is the screen's cue to paint a placeholder.
         """
-        key = PreviewKey(path=path, protocol=self._protocol, cells=box)
+        key = PreviewKey(path=path, protocol=self._protocol, cells=box, rotation=rotation % 4)
         with self._lock:
             frame = self._cache.get(key)
             if frame is not None:
@@ -123,9 +124,9 @@ class PreviewService:
         self._schedule(key)
         return None
 
-    def request(self, path: Path, box: Size) -> None:
+    def request(self, path: Path, box: Size, rotation: int = 0) -> None:
         """Warm the cache for ``path`` without needing the result now."""
-        key = PreviewKey(path=path, protocol=self._protocol, cells=box)
+        key = PreviewKey(path=path, protocol=self._protocol, cells=box, rotation=rotation % 4)
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
@@ -168,16 +169,19 @@ class PreviewService:
         """Worker-thread body. Opens the image, fits it, builds the frame."""
         with Image.open(key.path) as image:
             image.load()
-            source = Size(image.width, image.height)
+            rendered = ImageOps.exif_transpose(image)
+            for _ in range(key.rotation):
+                rendered = rendered.transpose(Image.Transpose.ROTATE_270)
+            source = Size(rendered.width, rendered.height)
             placement = fit(source, key.cells, self._cell_for(key.protocol))
             if placement.is_empty:
                 return MessageFrame("[Preview: no room]", key.cells.w)
 
             if key.protocol is GraphicsProtocol.KITTY:
-                png = kitty.encode_png(image, placement.px)
+                png = kitty.encode_png(rendered, placement.px)
                 return KittyFrame(png=png, cells=placement.cells, image_id=next(self._ids))
 
-            lines = render_image_to_ansi_from_pil(image, placement.cells.w, placement.cells.h)
+            lines = render_image_to_ansi_from_pil(rendered, placement.cells.w, placement.cells.h)
 
         if len(lines) != placement.cells.h:
             # The half-block renderer reports failure as a single bracketed

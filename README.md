@@ -181,6 +181,7 @@ The application follows this multi-stage workflow:
 3. **Scan Folder**: Validates images (JPEG, PNG, WEBP, TIFF, BMP, GIF)
 4. **Stage 1 - Select Images**: Two-pane TUI with live preview (asynchronous rendering)
    - Mark images with `y` or `Space` (shows `[x]`)
+   - Rotate the current image 90° clockwise with `r` (source files stay unchanged)
    - Lock selections with `Enter` (prevents accidental changes)
    - Proceed to next stage with `n`
 5. **Stage 2 - Configure Processing**: Interactive configuration screen
@@ -214,7 +215,8 @@ photo-upload /path/to/photos --prefix japan/tokyo
 ### 2. Select images (Stage 1)
 - Navigate through images with arrow keys
 - Press `y` or `Space` to mark images you want to upload (they show `[x]`)
-- Preview appears on the right side as you navigate, with a loading indicator on cache misses
+- Preview appears on the right side as you navigate, with camera/Finder orientation applied
+- Press `r` to rotate the current image 90° clockwise; the rotation is applied to the upload
 - Select multiple images by marking each one
 - Press `Enter` to lock your selections (green confirmation appears)
 - Press `n` to proceed to processing configuration
@@ -310,13 +312,14 @@ The image selection uses a multi-step workflow to prevent accidental uploads:
 - **Arrow Keys** (↑/↓): Navigate file list
 - **y** or **Space**: Toggle selection checkbox `[x]`
 - **a**: Select/deselect all images at once
+- **r**: Rotate the current image 90° clockwise without changing the source file
 - **Enter**: Lock/unlock selections
   - When unlocked: Locks your current selections
   - When locked: Unlocks to allow changes
 - **n**: Proceed to next stage (only available when selections are locked)
 - **q** or **Esc**: Cancel and quit
 
-Preview rendering is asynchronous to keep navigation responsive. When a preview is not cached, a short "[Loading preview...]" indicator appears while the render completes.
+Preview rendering is asynchronous to keep navigation responsive. EXIF Orientation is applied automatically, so previews match Finder and other photo viewers. When a preview is not cached, a short "[Loading preview...]" indicator appears while the render completes.
 
 ### Stage 2: Processing Configuration Screen
 

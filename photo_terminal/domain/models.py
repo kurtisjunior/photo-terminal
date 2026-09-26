@@ -13,12 +13,14 @@ an unchecked one.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 __all__ = [
     "OUTPUT_FORMATS",
     "Config",
+    "ImageSelection",
     "ProcessedImage",
     "ProcessingOptions",
     "S3Destination",
@@ -27,6 +29,34 @@ __all__ = [
 #: The formats the optimizer can write, in the order the configuration screen
 #: cycles through them.
 OUTPUT_FORMATS = ("JPEG", "PNG", "WEBP")
+
+
+@dataclass(frozen=True, eq=False)
+class ImageSelection:
+    """Images chosen in stage 1 and any non-destructive preview rotations.
+
+    Rotation values are clockwise quarter turns. Source files are never
+    rewritten; the imaging layer applies these turns to the uploaded copies.
+    """
+
+    images: list[Path]
+    rotations: dict[Path, int]
+
+    def __iter__(self) -> Iterator[Path]:
+        return iter(self.images)
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __contains__(self, path: object) -> bool:
+        return path in self.images
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ImageSelection):
+            return self.images == other.images and self.rotations == other.rotations
+        if isinstance(other, list):
+            return self.images == other
+        return NotImplemented
 
 
 @dataclass
