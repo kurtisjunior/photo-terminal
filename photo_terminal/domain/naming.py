@@ -16,7 +16,7 @@ __all__ = ["construct_s3_key", "normalize_prefix"]
 
 
 def normalize_prefix(prefix: str) -> str:
-    """Strip whitespace and trailing slashes from an S3 prefix.
+    """Strip whitespace and surrounding slashes from an S3 prefix.
 
     Examples:
         ``""`` -> ``""``
@@ -24,7 +24,7 @@ def normalize_prefix(prefix: str) -> str:
         ``"japan/"`` -> ``"japan"``
         ``"japan/tokyo/"`` -> ``"japan/tokyo"``
     """
-    return prefix.strip().rstrip("/")
+    return prefix.strip().strip("/")
 
 
 def construct_s3_key(prefix: str, filename: str) -> str:

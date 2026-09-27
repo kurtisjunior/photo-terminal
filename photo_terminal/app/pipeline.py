@@ -131,14 +131,10 @@ def configure_processing(ctx: PipelineContext, deps: Deps) -> Outcome:
 
 
 def choose_destination(ctx: PipelineContext, deps: Deps) -> Outcome:
-    """Stage 4: pick the bucket prefix, or take the CLI destination."""
-    if ctx.options.prefix is None:
-        deps.reporter.info("\nSelect S3 upload folder:\n")
+    """Stage 4: type the upload location before final submission."""
+    prefix = deps.enter_destination(ctx.config.bucket, ctx.config.aws_profile)
 
-    prefix = deps.browse_destination(ctx.config.bucket, ctx.config.aws_profile, ctx.options.prefix)
-
-    # "" is the bucket root and a real answer, so None is the only way the
-    # browser can say "I was quit without choosing".
+    # "" is the bucket root and a real answer, so None alone means cancelled.
     if prefix is None:
         return Outcome.ABORT
 
@@ -148,7 +144,7 @@ def choose_destination(ctx: PipelineContext, deps: Deps) -> Outcome:
 
 
 def confirm(ctx: PipelineContext, deps: Deps) -> Outcome:
-    """Show what is about to happen and ask for a yes."""
+    """Show what is about to happen and wait for final submission."""
     destination = ctx.require_destination()
     if not deps.confirm_upload(ctx.selection, destination.bucket, destination.prefix):
         return Outcome.ABORT

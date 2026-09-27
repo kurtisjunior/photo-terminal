@@ -141,9 +141,7 @@ def render_header(
     Kept separate from :func:`render_report` so the pipeline can show it while
     the images are still being measured, which is when it is useful.
     """
-    # The prefix arrives with a trailing slash from the S3 browser and without
-    # one from --prefix, and this line used to print "japan/tokyo//" for the
-    # first of those.
+    # Normalize surrounding slashes so typed paths never print a doubled slash.
     normalized = prefix.strip("/")
     s3_target = f"s3://{bucket}/{normalized}/" if normalized else f"s3://{bucket}/"
 

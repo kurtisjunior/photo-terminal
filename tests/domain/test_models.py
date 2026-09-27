@@ -57,7 +57,7 @@ def test_configs_compare_by_value():
     ],
 )
 def test_the_url_survives_however_the_prefix_arrived(prefix, expected):
-    """The browser hands back a trailing slash and ``--prefix`` does not."""
+    """The URL is stable for typed locations with surrounding slashes."""
     assert S3Destination("two-touch", prefix).url == expected
 
 

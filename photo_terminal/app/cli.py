@@ -26,9 +26,9 @@ __all__ = ["build_parser", "render_effective_config", "resolve_source", "run"]
 
 _EPILOG = """
 Examples:
-  %(prog)s ./photo.jpg japan/tokyo
-  %(prog)s ./photos italy/trapani
-  %(prog)s ./vacation spain/barcelona --dry-run
+  %(prog)s ./photo.jpg
+  %(prog)s ./photos
+  %(prog)s ./vacation --dry-run
 
 Configuration:
   Edit photo-uploader.yaml to change default settings.
@@ -47,16 +47,6 @@ def build_parser(default_target_size_kb: int) -> argparse.ArgumentParser:
         epilog=_EPILOG,
     )
     parser.add_argument("source_path", help="Image file or folder to upload")
-    parser.add_argument(
-        "destination",
-        nargs="?",
-        help='S3 folder path (e.g. "japan/tokyo"); omit to browse',
-    )
-    parser.add_argument(
-        "--prefix",
-        help=argparse.SUPPRESS,
-        default=None,
-    )
     parser.add_argument(
         "--target-size",
         type=int,
@@ -96,16 +86,11 @@ def render_effective_config(cfg: Config, options: CliOptions) -> str:
         "Configuration:",
         f"  Source:         {options.source}",
         f"  S3 bucket:      {cfg.bucket}",
-        f"  S3 prefix:      {options.prefix if options.prefix else '(root)'}",
         f"  AWS profile:    {cfg.aws_profile or '(env vars)'}",
         f"  Target size:    {cfg.target_size_kb} KB",
         f"  Dry-run mode:   {'Yes' if options.dry_run else 'No'}",
         "",
     ]
-
-    target = f"s3://{cfg.bucket}/{options.prefix}/" if options.prefix else f"s3://{cfg.bucket}/"
-    lines.append(f"Upload target: {target}")
-    lines.append("")
 
     return "\n".join(lines)
 
@@ -149,10 +134,6 @@ def run(argv: list[str] | None = None, reporter: ProgressReporter | None = None)
 
     args = build_parser(cfg.target_size_kb).parse_args(argv)
 
-    if args.destination is not None and args.prefix is not None:
-        report.warn("Error: Give the S3 folder once, as the second argument")
-        return 2
-
     try:
         source = resolve_source(args.source_path)
     except PhotoTerminalError as e:
@@ -160,7 +141,6 @@ def run(argv: list[str] | None = None, reporter: ProgressReporter | None = None)
 
     options = CliOptions(
         source=source,
-        prefix=args.destination if args.destination is not None else args.prefix,
         target_size_kb=args.target_size,
         dry_run=args.dry_run,
     )

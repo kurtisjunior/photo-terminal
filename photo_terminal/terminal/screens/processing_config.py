@@ -1,4 +1,4 @@
-"""Stage 3: choose how the locked images are processed.
+"""Stage 3: choose how the selected images are processed.
 
 Three options - resize, EXIF preservation, output format - navigated with the
 arrows and toggled with Space. Rich draws the table here rather than the
@@ -31,12 +31,12 @@ __all__ = ["show_processing_config"]
 
 
 def show_processing_config(
-    locked_images: list[Path], default_target_size_kb: int
+    selected_images: list[Path], default_target_size_kb: int
 ) -> ProcessingOptions | None:
-    """Show the processing configuration screen for the locked images.
+    """Show the processing configuration screen for the selected images.
 
     Args:
-        locked_images: The image paths the user selected on stage 2.
+        selected_images: The image paths the user selected on stage 1.
         default_target_size_kb: The configured target size, shown against the
             resize option and carried into the answer.
 
@@ -68,7 +68,7 @@ def show_processing_config(
         header = Text()
         header.append("Processing Configuration\n", style="bold cyan")
         header.append(
-            f"Configure processing for {len(locked_images)} locked image(s)\n", style="dim"
+            f"Configure processing for {len(selected_images)} selected image(s)\n", style="dim"
         )
         console.print(Panel(header, border_style="cyan"))
         console.print()
@@ -140,7 +140,7 @@ def show_processing_config(
         controls = Text()
         controls.append("↑/↓: Navigate  ", style="dim")
         controls.append("Space: Toggle/Cycle  ", style="dim")
-        controls.append("y: Confirm  ", style="dim")
+        controls.append("Enter: Continue  ", style="dim")
         controls.append("b: Go Back  ", style="dim")
         controls.append("q/Esc: Cancel", style="dim")
         console.print(controls)
@@ -178,7 +178,7 @@ def show_processing_config(
                     # Toggle boolean option
                     options[option_key] = not options[option_key]
 
-            elif char == "y" or char == "Y":  # Y - confirm
+            elif char in ("\r", "\n"):  # Enter - complete this stage
                 return ProcessingOptions(
                     resize=bool(options["resize"]),
                     target_size_kb=default_target_size_kb,

@@ -12,12 +12,12 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 
 ### Included Features
 
-- Multi-stage workflow with selection locking (Stage 1: select, Stage 2: configure, Stage 3: browse)
+- Multi-stage workflow with Enter completing every stage
 - Two-pane TUI with file list (left) and in-process image preview (right) for image selection
 - Asynchronous preview rendering with loading indicator on cache misses
 - Processing configuration screen (resize, EXIF preservation, output format)
 - Output format selection (JPEG, PNG, WEBP) with format-specific optimization
-- Interactive S3 folder browser with hierarchy navigation (existing bucket structure)
+- Typed S3 upload-location stage immediately before final submission
 - Batch image conversion with size-based optimization (~400kb target, configurable)
 - Basic EXIF preservation (camera, date taken, GPS) using Pillow
 - Temp file processing with automatic cleanup
@@ -56,7 +56,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
    - Auto-create ./photo-uploader.yaml in the working directory on first run, with sensible defaults
 
 2. **Build CLI framework with argparse supporting config overrides and dry-run mode**
-   - Support folder path input, --prefix, --target-size, --dry-run flags
+   - Support folder path input, --target-size, and --dry-run flags
    - CLI arguments override config file values for flexibility
 
 3. **Implement folder scanner with format validation (JPEG, PNG, WEBP, TIFF, BMP, GIF)**
@@ -69,12 +69,13 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
    - Preview rendering is asynchronous with a loading indicator on cache misses
    - Arrow keys navigate, spacebar toggles selection, enter confirms
 
-5. **Implement interactive S3 folder browser with hierarchy navigation**
-   - Query existing S3 structure (japan/, italy/trapani/, etc.) using boto3 ListBuckets
-   - Allow drilling into subdirectories to select upload target
+5. **Implement typed S3 upload-location stage**
+   - Ask for a location such as japan/tokyo or newyork/summer-23 immediately before submission
+   - Enter completes the stage; blank input explicitly selects the bucket root
 
 6. **Add selection confirmation with count display**
-   - After marking images, show "Upload X images? [y/n]" before processing starts
+   - Show the selected count and destination before upload
+   - Enter submits; q cancels
    - Minimal confirmation aligned with fail-fast philosophy
 
 7. **Implement size-based JPEG optimization using Pillow quality iteration**
@@ -117,7 +118,7 @@ A terminal-based image upload manager with two-pane TUI interface, providing int
 **Mitigation**: Use Python tempfile.TemporaryDirectory for automatic cleanup. Check available disk space before processing starts. Fail-fast if insufficient space.
 
 ### AWS credential or permission errors prevent S3 operations
-**Mitigation**: Test S3 access early (ListBucket on startup during folder browser). Fail-fast with clear error message pointing to AWS CLI configuration.
+**Mitigation**: Test S3 access before the upload-location stage. Fail-fast with clear error message pointing to AWS CLI configuration.
 
 ### Network failure during upload loses processed images
 **Mitigation**: Temp files persist until successful upload completion. User can retry operation without reprocessing since temp cleanup only happens on success or manual exit.
@@ -165,7 +166,7 @@ Size-based optimization targeting ~400kb (configurable). Format-specific strateg
 - PNG: Maximum compression (lossless, cannot reach target size)
 
 ### S3 Organization
-Interactive folder browser for existing bucket structure. Navigate hierarchy (japan/, italy/trapani/). No automatic folder creation or date-based organization.
+The upload location is typed during the workflow (for example, japan/tokyo or italy/trapani). No automatic folder creation or date-based organization.
 
 ### EXIF Preservation
 Basic fields only (camera, date taken, GPS). Leave date empty if missing from original. No fallback to file modification time.
@@ -180,12 +181,11 @@ Minimal: spinner with count during upload, completion summary with filenames. No
 None; the tool handles upload to S3 only. User's website generates size variants and manages CDN separately.
 
 ### Selection UI
-Two-pane TUI with checkbox-style indicators and multi-stage workflow:
-1. Mark images with y/Space (shows [x])
+Two-pane TUI with checkbox-style indicators:
+1. Mark images with Space (shows [x])
 2. Rotate the current image 90° clockwise with r when needed
-3. Lock selections with Enter (prevents accidental changes)
-4. Proceed with 'n' to processing configuration
-Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, spacebar/y toggles, 'r' rotates non-destructively, enter locks, and 'n' proceeds. Preview rendering applies EXIF Orientation and is asynchronous with a loading indicator on cache misses to keep navigation responsive.
+3. Press Enter to complete selection and continue
+Manual selection only, with 'a' key for select/deselect all. Arrow keys navigate, Space toggles, 'r' rotates non-destructively, and Enter proceeds. Preview rendering applies EXIF Orientation and is asynchronous with a loading indicator on cache misses to keep navigation responsive.
 
 ### Error Handling
 Fail-fast philosophy throughout. No retry logic, immediate error on duplicates, pre-validation before processing starts.

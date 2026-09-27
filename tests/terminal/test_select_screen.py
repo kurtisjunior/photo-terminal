@@ -272,7 +272,7 @@ class TestKeyboardSelection:
     def test_r_rotates_current_image_and_returns_the_rotation(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
 
-        scripted_keys(["r", "y", "\r", "n"])
+        scripted_keys(["r", "y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -292,6 +292,7 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
 
         assert "r: Rotate" in selector._hint_lines(80)[0]
+        assert "Enter: Continue" in selector._hint_lines(80)[0]
 
     def test_y_key_selects_current_and_proceeds(self, sample_images, scripted_keys):
         """Test that pressing 'y' toggles selection of current image (multi-stage workflow)."""
@@ -301,8 +302,7 @@ class TestKeyboardSelection:
         # Pre-select some other images
         selector.selected_indices = {0, 2}
 
-        # Mock stdin: 'y' to toggle, Enter to lock, 'n' to proceed
-        scripted_keys(["y", "\r", "n"])
+        scripted_keys(["y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -318,8 +318,7 @@ class TestKeyboardSelection:
         # Select all images first
         selector.selected_indices = {0, 1, 2}
 
-        # Press 'y' to toggle off index 2, then Enter to lock, 'n' to proceed
-        scripted_keys(["y", "\r", "n"])
+        scripted_keys(["y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -334,8 +333,7 @@ class TestKeyboardSelection:
         # Initially no selections
         assert len(selector.selected_indices) == 0
 
-        # Press 'a' to select all, Enter to lock, 'n' to proceed
-        scripted_keys(["a", "\r", "n"])
+        scripted_keys(["a", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -367,8 +365,7 @@ class TestKeyboardSelection:
         # Select only first image
         selector.selected_indices = {0}
 
-        # Press 'a' to select all, Enter to lock, 'n' to proceed
-        scripted_keys(["a", "\r", "n"])
+        scripted_keys(["a", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -393,9 +390,9 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
-        # Press spacebar twice (toggles on then off), then spacebar once more, then Enter to lock, 'n' to proceed
+        # Press spacebar three times, then Enter to proceed.
         # Net result: selected once
-        scripted_keys([" ", " ", " ", "\r", "n"])
+        scripted_keys([" ", " ", " ", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -410,23 +407,20 @@ class TestKeyboardSelection:
         # Initially not selected
         assert 0 not in selector.selected_indices
 
-        # Toggle on with spacebar, Enter to lock, 'n' to proceed
-        scripted_keys([" ", "\r", "n"])
+        scripted_keys([" ", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
         # Should have selected the first image
         assert result == [sample_images[0]]
 
-    def test_enter_still_works(self, sample_images, scripted_keys):
-        """Test that Enter locks selections, then 'n' proceeds."""
+    def test_enter_proceeds_immediately(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
 
         # Pre-select some images
         selector.selected_indices = {0, 2}
 
-        # Press Enter to lock, 'n' to proceed
-        scripted_keys(["\r", "n"])
+        scripted_keys(["\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -438,8 +432,7 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 0  # First image
 
-        # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        scripted_keys(["y", "\r", "n"])
+        scripted_keys(["y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -452,8 +445,7 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = len(sample_images) - 1  # Last image
 
-        # Press 'y' to toggle, Enter to lock, 'n' to proceed
-        scripted_keys(["y", "\r", "n"])
+        scripted_keys(["y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -466,8 +458,7 @@ class TestKeyboardSelection:
         selector = ImageSelector(sample_images)
         selector.current_index = 1
 
-        # Press uppercase 'Y' to toggle, Enter to lock, 'n' to proceed
-        scripted_keys(["Y", "\r", "n"])
+        scripted_keys(["Y", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -478,8 +469,7 @@ class TestKeyboardSelection:
         """Test that uppercase 'A' works the same as lowercase 'a'."""
         selector = ImageSelector(sample_images)
 
-        # Press uppercase 'A' to select all, Enter to lock, 'n' to proceed
-        scripted_keys(["A", "\r", "n"])
+        scripted_keys(["A", "\r"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
@@ -529,216 +519,37 @@ class TestProtocolDetection:
         assert detect_graphics_protocol({"TERM": "xterm-ghostty"}) == GraphicsProtocol.KITTY
 
 
-class TestMultiStageWorkflow:
-    """Tests for the complete multi-stage workflow (mark → lock → proceed)."""
+class TestSelectionCompletion:
+    """Tests for the mark → Enter workflow."""
 
-    def test_full_workflow_success(self, sample_images, scripted_keys):
-        """Test complete workflow: mark → lock → proceed → success."""
+    def test_enter_completes_with_the_selected_images(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
+        scripted_keys([" ", "\x1b", "[", "B", " ", "\r"])
 
-        # Mark first two images, then lock, then proceed
-        scripted_keys(["y", "\x1b", "[", "B", " ", "\r", "n"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             result = selector.run()
 
-        # Should return 2 selected images
         assert result is not None
-        assert len(result) == 2
-        assert sample_images[0] in result
-        assert sample_images[1] in result
-        assert selector._selections_locked is True
+        assert result.images == sample_images[:2]
 
-    def test_lock_without_selection(self, sample_images, scripted_keys):
-        """Test trying to lock with no images selected (should do nothing)."""
+    def test_enter_with_no_selection_does_not_complete(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
-
-        # Try to lock without selecting anything, then quit
         scripted_keys(["\r", "q"])
+
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
+            assert selector.run() is None
 
-        # Should return None (quit), lock should not have happened
-        assert result is None
-        assert selector._selections_locked is False
-        assert len(selector.selected_indices) == 0
-
-    def test_proceed_without_lock(self, sample_images, scripted_keys):
-        """Test trying 'n' without locking (should be ignored)."""
+    def test_escape_cancels(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
+        scripted_keys([" ", "\x1b", "x"])
 
-        # Mark an image, try 'n' without locking, then quit
-        scripted_keys(["y", "n", "q"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
+            assert selector.run() is None
 
-        # Should return None (quit), not proceed
-        assert result is None
-        assert selector._selections_locked is False
-
-    def test_lock_unlock_cycle(self, sample_images, scripted_keys):
-        """Test lock, then unlock, then lock again."""
+    def test_ctrl_c_before_completion_propagates(self, sample_images, scripted_keys):
         selector = ImageSelector(sample_images)
+        scripted_keys([" ", "\x03"])
 
-        # Mark image, lock, unlock, lock again, proceed
-        scripted_keys(["y", "\r", "\r", "\r", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return selected image, and be locked at end
-        assert result is not None
-        assert len(result) == 1
-        assert selector._selections_locked is True
-
-    def test_mark_after_lock(self, sample_images, scripted_keys):
-        """Test that marking works even after locking (lock doesn't prevent changes)."""
-        selector = ImageSelector(sample_images)
-
-        # Mark first image, lock, mark second image, proceed
-        scripted_keys(["y", "\r", "\x1b", "[", "B", "y", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should have both images selected (lock doesn't prevent changes in current implementation)
-        assert result is not None
-        assert len(result) == 2
-
-    def test_unlock_allows_changes(self, sample_images, scripted_keys):
-        """Test that after unlocking, can mark/unmark images again."""
-        selector = ImageSelector(sample_images)
-
-        # Mark image, lock, unlock, unmark image, mark different image, lock, proceed
-        scripted_keys(["y", "\r", "\r", "y", "\x1b", "[", "B", "y", "\r", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should have only second image (first was toggled off)
-        assert result is not None
-        assert len(result) == 1
-        assert sample_images[1] in result
-
-    def test_cancel_during_selection(self, sample_images, scripted_keys):
-        """Test pressing 'q' during marking stage."""
-        selector = ImageSelector(sample_images)
-
-        # Mark some images, then quit before locking
-        scripted_keys(["y", "\x1b", "[", "B", "y", "q"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return None (cancelled)
-        assert result is None
-        assert selector._selections_locked is False
-
-    def test_cancel_during_locked(self, sample_images, scripted_keys):
-        """Test pressing 'q' after locking."""
-        selector = ImageSelector(sample_images)
-
-        # Mark images, lock, then quit
-        scripted_keys(["y", "\r", "q"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return None (cancelled)
-        assert result is None
-        assert selector._selections_locked is True  # Lock state persists
-
-    def test_n_key_only_after_lock(self, sample_images, scripted_keys):
-        """Test that 'n' key requires lock first."""
-        selector = ImageSelector(sample_images)
-
-        # Verify 'n' is ignored without lock
-        scripted_keys(["y", "n", "\r", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should successfully return (first 'n' ignored, lock happened, second 'n' proceeded)
-        assert result is not None
-        assert len(result) == 1
-
-    def test_escape_key_cancels(self, sample_images, scripted_keys):
-        """Test that Escape key cancels selection."""
-        selector = ImageSelector(sample_images)
-
-        # Mark images, then press Escape (without arrow key following)
-        scripted_keys(["y", "\x1b", "x"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return None (cancelled by Escape)
-        assert result is None
-
-    def test_lock_state_preserved_across_navigation(self, sample_images, scripted_keys):
-        """Test that lock state is preserved when navigating."""
-        selector = ImageSelector(sample_images)
-
-        # Mark, lock, navigate, verify lock persists
-        scripted_keys(["y", "\r", "\x1b", "[", "B", "\x1b", "[", "A", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return selected images, lock should be active
-        assert result is not None
-        assert selector._selections_locked is True
-
-    def test_uppercase_n_works(self, sample_images, scripted_keys):
-        """Test that uppercase 'N' works for proceeding."""
-        selector = ImageSelector(sample_images)
-
-        # Mark, lock, proceed with uppercase N
-        scripted_keys(["y", "\r", "N"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should successfully return
-        assert result is not None
-        assert len(result) == 1
-
-    def test_multiple_selections_before_lock(self, sample_images, scripted_keys):
-        """Test marking multiple images before locking."""
-        selector = ImageSelector(sample_images)
-
-        # Mark all three images, then lock, then proceed
-        scripted_keys(["a", "\r", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Should return all images
-        assert result is not None
-        assert len(result) == 3
-        assert set(result) == set(sample_images)
-
-    def test_locked_indices_stored(self, sample_images, scripted_keys):
-        """Test that locked indices are stored correctly."""
-        selector = ImageSelector(sample_images)
-
-        # Mark first and third images, lock
-        scripted_keys(["y", "\x1b", "[", "B", "\x1b", "[", "B", "y", "\r", "n"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            result = selector.run()
-
-        # Verify locked indices match selected indices
-        assert selector._locked_indices == {0, 2}
-        assert len(result) == 2
-
-    def test_unlock_clears_locked_indices(self, sample_images, scripted_keys):
-        """Test that unlocking clears locked indices."""
-        selector = ImageSelector(sample_images)
-
-        # Mark, lock, unlock, quit
-        scripted_keys(["y", "\r", "\r", "q"])
-        with patch.object(selector, "render"), patch.object(selector._preview, "request"):
-            selector.run()
-
-        # Verify unlocked state
-        assert selector._selections_locked is False
-        assert len(selector._locked_indices) == 0
-
-    def test_ctrl_c_during_locked_stage(self, sample_images, scripted_keys):
-        """Test Ctrl+C during locked stage raises KeyboardInterrupt."""
-        selector = ImageSelector(sample_images)
-
-        # Mark, lock, then Ctrl+C
-        scripted_keys(["y", "\r", "\x03"])
         with patch.object(selector, "render"), patch.object(selector._preview, "request"):
             with pytest.raises(KeyboardInterrupt):
                 selector.run()

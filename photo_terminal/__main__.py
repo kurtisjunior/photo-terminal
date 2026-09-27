@@ -5,10 +5,10 @@ Terminal-based image upload manager with inline preview and batch JPEG
 optimization for S3 uploads.
 
 Usage:
-    pt <image-or-folder> <s3-folder> [options]
+    pt <image-or-folder> [options]
 
 Example:
-    pt ./images japan/tokyo
+    pt ./images
 
 This module is argv in, exit code out, and nothing else. It used to be 373
 lines, 285 of them a single ``main()``; what it did now lives in

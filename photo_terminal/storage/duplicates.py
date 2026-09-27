@@ -98,8 +98,7 @@ def _check_sequential(s3_client: Any, images: list[Path], bucket: str, prefix: s
     """Check for duplicates sequentially.
 
     Args:
-        s3_client: Boto3 S3 client. Untyped because boto3 has no stubs here;
-            the port in :mod:`photo_terminal.storage.ports` is what callers see
+        s3_client: Boto3 S3 client. Untyped because boto3 has no stubs here.
         images: List of image paths to check
         bucket: S3 bucket name
         prefix: S3 prefix with trailing slash (or empty string)

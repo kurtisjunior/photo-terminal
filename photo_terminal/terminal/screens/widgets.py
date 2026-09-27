@@ -70,9 +70,8 @@ class ListView[T]:
     def sync(self, items: Sequence[T], cursor: int | None = None) -> None:
         """Adopt a new list, keeping the cursor in range.
 
-        Used by screens whose list is owned elsewhere - the reorder screen's
-        order lives in the domain, and the S3 browser's list is whatever the
-        last listing returned.
+        Used by screens whose list is owned elsewhere, such as the reorder
+        screen whose order lives in the domain.
         """
         self.items = items
         if cursor is not None:

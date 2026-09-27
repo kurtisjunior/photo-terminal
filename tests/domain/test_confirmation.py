@@ -35,8 +35,9 @@ def many_images(tmp_path):
     return images
 
 
-def test_target_is_the_s3_url_for_bucket_and_prefix():
-    assert format_s3_target("test-bucket", "japan/tokyo/") == "s3://test-bucket/japan/tokyo/"
+@pytest.mark.parametrize("prefix", ["japan/tokyo", "japan/tokyo/", "/japan/tokyo/"])
+def test_target_is_the_s3_url_for_bucket_and_prefix(prefix):
+    assert format_s3_target("test-bucket", prefix) == "s3://test-bucket/japan/tokyo/"
 
 
 def test_an_empty_prefix_targets_the_bucket_root():
@@ -123,4 +124,6 @@ def test_summary_is_separated_into_sections(sample_images):
 def test_prompt_asks_about_the_count_and_the_target(sample_images):
     prompt = build_confirmation_prompt(sample_images, "test-bucket", "japan/tokyo/")
 
-    assert prompt == "Upload 3 image(s) to s3://test-bucket/japan/tokyo/? [y/n]: "
+    assert prompt == (
+        "Press Enter to upload 3 image(s) to s3://test-bucket/japan/tokyo/ (q to cancel): "
+    )

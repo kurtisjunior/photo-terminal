@@ -23,15 +23,17 @@ Put your AWS keys in `.env`. That is it. From now on, `cd` into this folder and 
 ## Use it
 
 ```sh
-pt <photo-or-folder> <folder-in-s3>
+pt <photo-or-folder>
 ```
 
 Examples:
 
 ```sh
-pt ~/Desktop/photo.jpg japan/tokyo
-pt ~/Desktop/trip-photos italy/trapani
+pt ~/Desktop/photo.jpg
+pt ~/Desktop/trip-photos
 ```
+
+The upload location is entered as a stage in the workflow, just before the final upload review. Press Enter to complete each stage and to submit the final upload.
 
 The S3 bucket and target image size live in `photo-uploader.yaml`. The app creates that file the first time it runs.
 

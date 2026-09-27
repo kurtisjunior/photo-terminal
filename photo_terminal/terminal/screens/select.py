@@ -1,11 +1,7 @@
 """Stage 1: pick the images to upload.
 
 A two-pane screen - the file list on the left, a live preview of the highlighted
-image on the right - with a multi-stage selection workflow:
-
-1. Mark images with ``y``/``x``/Space (shows ``[x]``)
-2. Lock the selection with Enter
-3. Proceed with ``n``
+image on the right. Space marks images and Enter completes the stage.
 
 Rendering has no per-mode branching in it. One :class:`Layout` says where
 everything goes, :class:`ListView` says which rows are on screen,
@@ -61,8 +57,6 @@ class ImageSelector:
         self._view: ListView[Path] = ListView(images)
         self.selected_indices: set[int] = set()  # Set of selected image indices
         self._first_render = True
-        self._selections_locked = False  # Track if selections are locked
-        self._locked_indices: set[int] = set()  # Store locked selection indices
         self.rotations: dict[Path, int] = {}
 
         self._protocol = detect_graphics_protocol()
@@ -171,24 +165,12 @@ class ImageSelector:
 
     def _hint_lines(self, width: int) -> tuple[str, str]:
         """The two hint rows, abbreviated to fit a narrow pane."""
-        if self._selections_locked:
-            return (
-                "\033[1;32m✓ Selections locked\033[0m",
-                widest_that_fits(
-                    [
-                        "n: Next Stage  Enter: Unlock  q/Esc: Cancel",
-                        "n: Next  Enter: Unlock  q: Cancel",
-                        "n: Next  q: Cancel",
-                    ],
-                    width,
-                ),
-            )
         return (
             widest_that_fits(
                 [
-                    "↑/↓ Nav  x/y/Space: Mark  r: Rotate  a: All  Enter: Lock",
-                    "↑/↓ Nav  Space: Mark  r: Rotate  Enter: Lock",
-                    "Space: Mark  r: Rotate  Enter: Lock",
+                    "↑/↓ Nav  Space: Mark  r: Rotate  a: All  Enter: Continue",
+                    "↑/↓ Nav  Space: Mark  r: Rotate  Enter: Continue",
+                    "Space: Mark  r: Rotate  Enter: Continue",
                 ],
                 width,
             ),
@@ -289,33 +271,9 @@ class ImageSelector:
                 self.toggle_selection()
             elif key == "\r" or key == "\n":  # Enter
                 logger.info("Enter pressed")
-                if not self._selections_locked:
-                    # Lock the selections
-                    if not self.selected_indices:
-                        # No images selected, continue
-                        logger.warning("No images selected, cannot lock")
-                        continue
-                    self._selections_locked = True
-                    self._locked_indices = self.selected_indices.copy()
-                    logger.info(f"Selections locked: {len(self._locked_indices)} images")
-                else:
-                    # Unlock the selections
-                    self._selections_locked = False
-                    self._locked_indices = set()
-                    logger.info("Selections unlocked")
-                # Don't return - stay in the loop
-            elif key in ("y", "Y", "x", "X"):
-                # Just mark the image, don't proceed
-                logger.info(f"'{key}' pressed - toggling selection")
-                self.toggle_selection()
-            elif key in ("r", "R"):
-                logger.info("R pressed - rotating current image clockwise")
-                self.rotate_current()
-            elif key == "n" or key == "N":
-                if not self._selections_locked:
-                    logger.info("'n' pressed but selections not locked - ignoring")
+                if not self.selected_indices:
+                    logger.warning("No images selected, cannot continue")
                     continue
-                logger.info("'n' pressed - proceeding to next stage")
                 selected = self.get_selected_images()
                 return ImageSelection(
                     images=selected,
@@ -323,6 +281,13 @@ class ImageSelector:
                         path: self.rotations[path] for path in selected if path in self.rotations
                     },
                 )
+            elif key in ("y", "Y", "x", "X"):
+                # Just mark the image, don't proceed
+                logger.info(f"'{key}' pressed - toggling selection")
+                self.toggle_selection()
+            elif key in ("r", "R"):
+                logger.info("R pressed - rotating current image clockwise")
+                self.rotate_current()
             elif key == "a" or key == "A":
                 # Toggle select all
                 logger.info("'a' pressed - toggling select all")
@@ -334,7 +299,7 @@ class ImageSelector:
                     # Some or none selected, select all
                     self.selected_indices = set(range(len(self._view)))
                     logger.info(f"Selected all {len(self._view)} images")
-                # Don't return - let user confirm with Enter
+                # Don't return - let the user continue with Enter
             elif key == "q" or key == "Q":  # Quit
                 logger.info("Q pressed, exiting")
                 return None

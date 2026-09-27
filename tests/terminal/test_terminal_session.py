@@ -80,7 +80,7 @@ def test_termios_is_restored_when_the_body_raises(fake_termios):
 
 
 def test_systemexit_from_the_body_still_restores(fake_termios):
-    """`q` on the S3 browser leaves via SystemExit, not a return."""
+    """Even a library raising SystemExit cannot strand the alternate screen."""
     recorder = FakeTerminal()
 
     with pytest.raises(SystemExit), TerminalSession(sink=recorder):

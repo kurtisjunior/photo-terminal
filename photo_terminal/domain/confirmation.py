@@ -21,8 +21,9 @@ MAX_DISPLAY = 10
 
 def format_s3_target(bucket: str, prefix: str) -> str:
     """The ``s3://`` URL for a bucket and prefix, with an empty prefix meaning root."""
-    if prefix:
-        return f"s3://{bucket}/{prefix}"
+    normalized = prefix.strip("/")
+    if normalized:
+        return f"s3://{bucket}/{normalized}/"
     return f"s3://{bucket}/"
 
 
@@ -61,4 +62,7 @@ def build_confirmation_summary(images: list[Path], bucket: str, prefix: str) -> 
 
 def build_confirmation_prompt(images: list[Path], bucket: str, prefix: str) -> str:
     """The question put to the user, including its trailing space."""
-    return f"Upload {len(images)} image(s) to {format_s3_target(bucket, prefix)}? [y/n]: "
+    return (
+        f"Press Enter to upload {len(images)} image(s) to "
+        f"{format_s3_target(bucket, prefix)} (q to cancel): "
+    )

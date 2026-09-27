@@ -1,8 +1,8 @@
-"""The upload confirmation prompt.
+"""The final upload submission prompt.
 
-A line-mode screen rather than a full-screen one: it prints a summary and reads
-a ``y``/``n`` on the main buffer, so no session, no raw mode and no alternate
-screen are involved.
+A line-mode screen rather than a full-screen one: it prints a summary and lets
+Enter submit on the main buffer, so no session, raw mode, or alternate screen
+is involved.
 
 It used to raise ``SystemExit(1)`` from inside ``confirmation.py`` when the
 user declined, which made "the user said no" indistinguishable from "something
@@ -18,7 +18,7 @@ __all__ = ["confirm_upload"]
 
 
 def confirm_upload(images: list[Path], bucket: str, prefix: str) -> bool:
-    """Display the upload summary and prompt for confirmation.
+    """Display the upload summary and submit when the user presses Enter.
 
     Args:
         images: List of image paths to upload
@@ -26,7 +26,7 @@ def confirm_upload(images: list[Path], bucket: str, prefix: str) -> bool:
         prefix: S3 prefix/folder path (may be empty string for root)
 
     Returns:
-        True if the user confirmed, False if they declined or sent EOF.
+        True if the user pressed Enter, False if they cancelled or sent EOF.
     """
     print(build_confirmation_summary(images, bucket, prefix))
     print()
@@ -42,13 +42,13 @@ def confirm_upload(images: list[Path], bucket: str, prefix: str) -> bool:
             print("Upload cancelled.")
             return False
 
-        if response in ("y", "yes"):
+        if response == "":
             print()
             return True
 
-        if response in ("n", "no"):
+        if response in ("q", "quit", "cancel"):
             print()
             print("Upload cancelled.")
             return False
 
-        print("Invalid input. Please enter 'y' or 'n'.")
+        print("Invalid input. Press Enter to upload or type 'q' to cancel.")

@@ -25,12 +25,12 @@ class TestShowProcessingConfig:
         assert callable(show_processing_config)
 
         assert show_processing_config.__doc__ is not None
-        assert "locked_images" in show_processing_config.__doc__
+        assert "selected_images" in show_processing_config.__doc__
         assert "default_target_size_kb" in show_processing_config.__doc__
 
     def test_confirm_returns_typed_options(self, scripted_keys):
         """The answer is a ProcessingOptions, not a dict indexed by literal."""
-        scripted_keys(["y"])
+        scripted_keys(["\r"])
 
         result = show_processing_config(LOCKED, 500)
 
@@ -58,7 +58,7 @@ class TestShowProcessingConfig:
 
     def test_carries_the_configured_target_size(self, scripted_keys):
         """Test that the configured target size is carried into the answer."""
-        scripted_keys(["y"])
+        scripted_keys(["\r"])
 
         result = show_processing_config(LOCKED, 600)
 
@@ -66,7 +66,7 @@ class TestShowProcessingConfig:
 
     def test_toggle_options(self, scripted_keys):
         """Test that spacebar toggles options correctly."""
-        scripted_keys([" ", "y"])
+        scripted_keys([" ", "\r"])
 
         result = show_processing_config(LOCKED, 400)
 
@@ -76,7 +76,7 @@ class TestShowProcessingConfig:
 
     def test_arrow_keys_move_between_options(self, scripted_keys):
         """Down, down, space: the output format cycles, not a checkbox."""
-        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, " ", "y"])
+        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, " ", "\r"])
 
         result = show_processing_config(LOCKED, 400)
 
@@ -86,7 +86,7 @@ class TestShowProcessingConfig:
 
     def test_navigation_is_bounded_at_the_top(self, scripted_keys):
         """Up from the first option stays on the first option."""
-        scripted_keys([*UP_ARROW, " ", "y"])
+        scripted_keys([*UP_ARROW, " ", "\r"])
 
         result = show_processing_config(LOCKED, 400)
 
@@ -94,7 +94,7 @@ class TestShowProcessingConfig:
 
     def test_navigation_is_bounded_at_the_bottom(self, scripted_keys):
         """Down past the last option stays on the last option."""
-        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, *DOWN_ARROW, " ", "y"])
+        scripted_keys([*DOWN_ARROW, *DOWN_ARROW, *DOWN_ARROW, " ", "\r"])
 
         result = show_processing_config(LOCKED, 400)
 

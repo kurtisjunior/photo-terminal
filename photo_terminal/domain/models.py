@@ -6,9 +6,8 @@ and ``reporting`` can summarise one without any of the three importing each
 other.
 
 ``ProcessingOptions`` and ``S3Destination`` replace the untyped dictionary and
-the bare string the configuration screen and the S3 browser used to hand back.
-A ``dict[str, Any]`` that five call sites index by literal key is a type, just
-an unchecked one.
+bare strings screens used to hand back. A ``dict[str, Any]`` that five call
+sites index by literal key is a type, just an unchecked one.
 """
 
 from __future__ import annotations

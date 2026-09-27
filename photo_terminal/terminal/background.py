@@ -4,12 +4,9 @@ This is the one piece of asynchronous machinery in the package. It was the
 best-designed part of the code this replaces - work runs on a bounded pool and a
 self-pipe folded into the input loop's ``select`` set wakes the loop in
 microseconds rather than waiting out the 50ms poll - but it was written twice,
-once in the select screen and once in the reorder screen, and a third screen
-that needed it (the S3 browser) made its blocking call straight from the
-keystroke loop instead.
+once in the select screen and once in the reorder screen.
 
-Now there is one copy. ``PreviewService`` owns one for rendering previews and
-the S3 browser owns one for listings; both hand ``wait_fd`` to the same reader.
+Now there is one copy, owned by ``PreviewService`` for rendering previews.
 """
 
 from __future__ import annotations

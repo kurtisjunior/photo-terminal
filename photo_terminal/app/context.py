@@ -37,7 +37,6 @@ class CliOptions:
     """What the user asked for on the command line, already validated."""
 
     source: Path
-    prefix: str | None
     target_size_kb: int | None
     dry_run: bool
 
@@ -121,7 +120,7 @@ class Deps:
     ask_reorder: Callable[[], bool]
     reorder_images: Callable[[list[Path]], list[tuple[Path, str]] | None]
     show_processing_config: Callable[[list[Path], int], ProcessingOptions | None]
-    browse_destination: Callable[[str, str | None, str | None], str | None]
+    enter_destination: Callable[[str, str | None], str | None]
     confirm_upload: Callable[[list[Path], str, str], bool]
 
     # storage

@@ -17,10 +17,9 @@ Two things are genuinely new:
   memory tracking ours.
 
 The pool and the pipe themselves now live in
-:class:`~photo_terminal.terminal.background.BackgroundWorker`, because the S3
-browser needs exactly the same thing to get its listings off the keystroke loop.
-What is left here is what is specific to previews: the key, the cache, and what
-eviction owes the terminal.
+:class:`~photo_terminal.terminal.background.BackgroundWorker`. What is left
+here is what is specific to previews: the key, the cache, and what eviction
+owes the terminal.
 """
 
 from __future__ import annotations

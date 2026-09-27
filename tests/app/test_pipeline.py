@@ -148,60 +148,52 @@ def test_configure_aborts_when_cancelled(tmp_path, deps):
 # -- choose_destination --------------------------------------------------- #
 
 
-def test_destination_takes_the_cli_prefix_without_browsing(tmp_path, deps, reporter):
-    ctx = make_context(tmp_path, prefix="japan/tokyo")
+def test_destination_records_the_typed_location(tmp_path, deps, reporter):
+    ctx = make_context(tmp_path)
 
-    outcome = pipeline.choose_destination(
-        ctx, deps(browse_destination=lambda b, p, initial: "japan/tokyo/")
-    )
+    outcome = pipeline.choose_destination(ctx, deps(enter_destination=lambda b, p: "japan/tokyo"))
 
     assert outcome is Outcome.CONTINUE
-    assert ctx.destination == S3Destination("test-bucket", "japan/tokyo/")
-    assert "Select S3 upload folder" not in "".join(reporter.infos)
-
-
-def test_destination_announces_the_browser_when_no_prefix_was_given(tmp_path, deps, reporter):
-    pipeline.choose_destination(make_context(tmp_path), deps())
-
-    assert "Select S3 upload folder" in "".join(reporter.infos)
+    assert ctx.destination == S3Destination("test-bucket", "japan/tokyo")
+    assert "Upload target: s3://test-bucket/japan/tokyo/" in "".join(reporter.infos)
 
 
 def test_the_bucket_root_is_a_real_destination(tmp_path, deps):
     """An empty prefix means the root. Only ``None`` means "nothing chosen"."""
     ctx = make_context(tmp_path)
 
-    outcome = pipeline.choose_destination(ctx, deps(browse_destination=lambda b, p, initial: ""))
+    outcome = pipeline.choose_destination(ctx, deps(enter_destination=lambda b, p: ""))
 
     assert outcome is Outcome.CONTINUE
     assert ctx.destination == S3Destination("test-bucket", "")
     assert ctx.destination.url == "s3://test-bucket/"
 
 
-def test_destination_aborts_when_the_browser_was_quit(tmp_path, deps):
+def test_destination_aborts_when_entry_was_cancelled(tmp_path, deps):
     ctx = make_context(tmp_path)
 
-    outcome = pipeline.choose_destination(ctx, deps(browse_destination=lambda b, p, initial: None))
+    outcome = pipeline.choose_destination(ctx, deps(enter_destination=lambda b, p: None))
 
     assert outcome is Outcome.ABORT
     assert ctx.destination is None
 
 
 def test_destination_lets_an_access_failure_through(tmp_path, deps):
-    def refuse(bucket, profile, initial):
+    def refuse(bucket, profile):
         raise S3AccessError("Cannot access S3 bucket 'test-bucket'")
 
     with pytest.raises(S3AccessError):
-        pipeline.choose_destination(make_context(tmp_path), deps(browse_destination=refuse))
+        pipeline.choose_destination(make_context(tmp_path), deps(enter_destination=refuse))
 
 
 # -- confirm -------------------------------------------------------------- #
 
 
-def test_confirm_continues_on_yes(tmp_path, deps):
+def test_confirm_continues_on_submission(tmp_path, deps):
     assert pipeline.confirm(configured(tmp_path), deps()) is Outcome.CONTINUE
 
 
-def test_confirm_aborts_on_no(tmp_path, deps):
+def test_confirm_aborts_on_cancel(tmp_path, deps):
     outcome = pipeline.confirm(
         configured(tmp_path), deps(confirm_upload=lambda images, bucket, prefix: False)
     )
@@ -425,7 +417,7 @@ def test_a_failed_cleanup_only_warns(tmp_path, deps, reporter):
 
 
 def test_a_full_run_exits_zero(tmp_path, deps, reporter):
-    ctx = make_context(tmp_path, prefix="japan/tokyo")
+    ctx = make_context(tmp_path)
 
     assert pipeline.execute(ctx, deps()) == 0
     assert "UPLOAD COMPLETE" in "".join(reporter.infos)
@@ -434,7 +426,7 @@ def test_a_full_run_exits_zero(tmp_path, deps, reporter):
 def test_a_dry_run_exits_zero_without_uploading(tmp_path, deps):
     uploaded: list[object] = []
 
-    ctx = make_context(tmp_path, prefix="japan/tokyo", dry_run=True)
+    ctx = make_context(tmp_path, dry_run=True)
     assert pipeline.execute(ctx, deps(upload_images=lambda *a, **k: uploaded.append(a))) == 0
     assert uploaded == []
 
@@ -469,7 +461,7 @@ def test_a_failed_upload_says_the_temp_files_were_kept(tmp_path, deps, reporter)
     def fail(*args, **kwargs):
         raise UploadFailed("Failed to upload 'photo.jpg'")
 
-    ctx = make_context(tmp_path, prefix="japan/tokyo")
+    ctx = make_context(tmp_path)
     assert pipeline.execute(ctx, deps(upload_images=fail)) == 1
     assert "Temp files preserved for retry" in "".join(reporter.infos)
 

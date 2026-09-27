@@ -1,14 +1,4 @@
-"""S3 access: credentials and prefix listing.
-
-This is infrastructure and nothing else. The screen half lives in
-:mod:`photo_terminal.terminal.screens.s3_browse`, which takes a
-:class:`~photo_terminal.storage.ports.FolderLister` and makes no AWS calls of
-its own; this module is the boto3 implementation of that port.
-
-Composing the two - validate access, build the lister, run the browser - is a
-pipeline step. It used to be ``browse_s3_folders`` here, which made the storage
-package import a screen and inverted the dependency this phase set out to fix.
-"""
+"""Validate S3 access before accepting an upload location."""
 
 import boto3
 from botocore.exceptions import (
@@ -21,11 +11,7 @@ from botocore.exceptions import (
 
 from photo_terminal.domain.errors import S3AccessError
 
-__all__ = [
-    "S3FolderLister",
-    "list_s3_folders",
-    "validate_s3_access",
-]
+__all__ = ["validate_s3_access"]
 
 
 def validate_s3_access(bucket: str, aws_profile: str | None) -> None:
@@ -108,53 +94,3 @@ def validate_s3_access(bucket: str, aws_profile: str | None) -> None:
         raise S3AccessError(
             f"Unexpected error accessing S3: {e}\n\nPlease check your AWS configuration."
         ) from e
-
-
-def list_s3_folders(bucket: str, aws_profile: str | None, prefix: str = "") -> list[str]:
-    """List folders (CommonPrefixes) at a given S3 prefix level.
-
-    Args:
-        bucket: S3 bucket name
-        aws_profile: AWS profile name, or None to let boto3 resolve credentials
-            from the environment (e.g. AWS_ACCESS_KEY_ID)
-        prefix: S3 prefix to list (e.g., "japan/" or "")
-
-    Returns:
-        List of folder names (without full prefix path)
-
-    Raises:
-        S3AccessError: If S3 access fails
-    """
-    try:
-        session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-        s3_client = session.client("s3")
-
-        # Use delimiter='/' to get folder-like structure
-        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
-
-        # Extract CommonPrefixes (folders)
-        folders = []
-        for common_prefix in response.get("CommonPrefixes", []):
-            full_prefix = common_prefix["Prefix"]
-
-            # Extract just the folder name (last segment before trailing /)
-            # e.g., "japan/tokyo/" -> "tokyo"
-            folder_name = full_prefix.rstrip("/").split("/")[-1]
-            folders.append(folder_name)
-
-        return sorted(folders)
-
-    except Exception as e:
-        raise S3AccessError(f"Error listing S3 folders: {e}") from e
-
-
-class S3FolderLister:
-    """The boto3 implementation of :class:`~photo_terminal.storage.ports.FolderLister`."""
-
-    def __init__(self, bucket: str, aws_profile: str | None):
-        self.bucket = bucket
-        self.aws_profile = aws_profile
-
-    def list_folders(self, prefix: str) -> list[str]:
-        """The folder names directly under ``prefix``, sorted."""
-        return list_s3_folders(self.bucket, self.aws_profile, prefix)

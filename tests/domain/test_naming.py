@@ -30,6 +30,10 @@ def test_normalize_prefix_multiple_trailing_slashes():
     assert normalize_prefix("japan///") == "japan"
 
 
+def test_normalize_prefix_leading_slashes():
+    assert normalize_prefix("/japan/tokyo/") == "japan/tokyo"
+
+
 def test_normalize_prefix_whitespace():
     """Test normalizing prefix with whitespace."""
     assert normalize_prefix("  japan/tokyo  ") == "japan/tokyo"

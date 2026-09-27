@@ -283,7 +283,7 @@ def test_render_header_without_prefix():
 
 @pytest.mark.parametrize("prefix", ["japan/tokyo", "japan/tokyo/", "/japan/tokyo/"])
 def test_render_header_prints_one_slash_between_prefix_and_root(prefix):
-    """The browser hands back a trailing slash; --prefix does not."""
+    """Typed locations produce one separator regardless of surrounding slashes."""
     assert "Target location: s3://test-bucket/japan/tokyo/\n" in render_header(
         "test-bucket", prefix, 400
     )

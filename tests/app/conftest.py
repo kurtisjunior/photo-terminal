@@ -50,7 +50,6 @@ def make_processed(tmp_path: Path, name: str = "photo.jpg") -> ProcessedImage:
 def make_context(
     tmp_path: Path,
     *,
-    prefix: str | None = None,
     dry_run: bool = False,
     target_size_kb: int | None = None,
     config: Config | None = None,
@@ -61,7 +60,6 @@ def make_context(
         config=config if config is not None else CONFIG,
         options=CliOptions(
             source=tmp_path,
-            prefix=prefix,
             target_size_kb=target_size_kb,
             dry_run=dry_run,
         ),
@@ -101,7 +99,7 @@ class FakeDeps:
             "ask_reorder": lambda: False,
             "reorder_images": lambda images: None,
             "show_processing_config": lambda images, size: OPTIONS,
-            "browse_destination": lambda bucket, profile, prefix: prefix or "",
+            "enter_destination": lambda bucket, profile: "japan/tokyo",
             "confirm_upload": lambda images, bucket, prefix: True,
             "check_for_duplicates": lambda images, bucket, prefix, profile: None,
             "upload_images": self._upload_images,
